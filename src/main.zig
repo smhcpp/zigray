@@ -12,12 +12,24 @@ pub fn toVec2i(vec: rl.Vector2) Vec2i {
 pub fn iToF32(v:i32) f32{
     return @floatFromInt(v);
 }
+pub fn isColRecRec(pos1:Vec2i,size1:Vec2i,pos2:Vec2i,size2:Vec2i)bool{
+    if (pos1[0] <= pos2[0] and pos1[0]+size1[0] >= pos2[0] and pos1[1] <= pos2[1] and pos1[1]+size1[1] >= pos2[1]) return true;
+    if (pos2[0] <= pos1[0] and pos2[0]+size2[0] >= pos1[0] and pos2[1] <= pos1[1] and pos2[1]+size2[1] >= pos1[1]) return true;
+    return false;
+}
+
+pub fn isColPlayerPlatform(player:*Player,plat:Platform) bool{
+    return isColRecRec(player.pos, Vec2i{2*player.r,2*player.r}, plat.pos, plat.size);
+}
 /// radius is the radius of half circles on top and bottom of capsule
 /// height is 4*radius and width is 2*radius
 const Player = struct {
     pos:Vec2i,
     r:i32=10,
     color:rl.Color=.blue,
+    vel: Vec2i=Vec2i{0,0},
+    maxvel:Vec2i=Vec2i{5,5},
+    jump_power: i32=10,
 
     pub fn draw(self:*Player)void{
         const baspos= toRLVec(self.pos);
@@ -43,6 +55,27 @@ pub const TileType = enum{
     empty,
     block,
 };
+
+pub fn isPlayerMoveValid(g:*Game,newpos:Vec2i) bool{
+    const capleft= newpos[0] - g.player.r;
+    const capright= newpos[0] + g.player.r;
+    const captop= newpos[1] - 2*g.player.r;
+    const capbot= newpos[1] + 2*g.player.r;
+    const imin = @divTrunc(capleft,Game.TileSize);
+    const jmin = @divTrunc(captop,Game.TileSize);
+    const imax = @divTrunc(capright, Game.TileSize);
+    const jmax = @divTrunc(capbot, Game.TileSize);
+    var i =imin;
+    while(i<=imax):(i+=1){
+        var j = jmin;
+        while(j<=jmax):(j+=1){
+            if (g.tileset.get(Vec2i{i,j})) |tile|{
+                if (tile==.block) return true;
+            }
+        }
+    }
+    return false;
+}
 // pub const TileSet = struct{
     // tiles: std.AutoHashMap(Vec2i, TileType),
 // };
@@ -51,7 +84,11 @@ pub const Game = struct {
     pub const TileSize: i32 =32;
     pub const TileNumberX:i32 = 32;
     pub const TileNumberY:i32 = 20;
-    pub const TileSetVec2i = Vec2i{TileSize, TileSize};
+    pub const TileSizeVec2i = Vec2i{TileSize, TileSize};
+
+    fps:i32=60,
+    gravity: i32 = 1,
+    dt:f32=undefined,
     allocator: std.mem.Allocator,
     player: Player=undefined,
     screenWidth:i32=TileNumberX*TileSize,
@@ -71,6 +108,7 @@ pub const Game = struct {
     }
 
     fn setup(self:*Game) !void {
+        self.dt=1.0/iToF32(self.fps);
         self.player = Player{
             .pos = .{@divTrunc(self.screenWidth, 2), @divTrunc(self.screenHeight, 2)},
         };
@@ -80,6 +118,10 @@ pub const Game = struct {
             .size = .{5, 7},
         });
 
+        try self.platforms.append(self.allocator,Platform{
+            .pos = .{0, 19},
+            .size = .{31, 1},
+        });
         for (self.platforms.items) |platform| {
             var i :usize = @intCast( platform.pos[0]);
             var j :usize = undefined;
@@ -98,25 +140,67 @@ pub const Game = struct {
         for(self.platforms.items) |platform|{
             rl.drawRectangleV(toRLVec(platform.pos * Vec2i{TileSize, TileSize}),toRLVec(platform.size * Vec2i{TileSize, TileSize}),platform.color);
         }
+        self.drawTileLines();
+    }
+
+    fn drawTileLines(self:*Game) void{
         var iter = self.tileset.iterator();
-        defer iter.deinit();
-        while(iter.next())|key||value| {
-            const pos = value * TileSetVec2i;
+        while(iter.next()) |entry| {
+            const pos = entry.key_ptr.* * TileSizeVec2i;
             rl.drawRectangleLines(pos[0], pos[1],TileSize,TileSize, .yellow);
         }
         self.player.draw();
     }
 
+    pub fn process(g:*Game) void{
+        const dx: i32=3;
+        if (rl.isKeyDown(rl.KeyboardKey.left)){
+            g.player.vel[0]=-dx;
+            print("left\n",.{});
+        }else if(rl.isKeyDown(rl.KeyboardKey.right)){
+            g.player.vel[0]=dx;
+            print("right\n",.{});
+        }else{
+            g.player.vel[0]=0;
+        }
+        if (rl.isKeyPressed(rl.KeyboardKey.space)){
+            g.player.vel[1] = - g.player.jump_power;
+        }
+        // if (rl.isKeyDown(rl.KeyboardKey.up)){
+            // g.player.vel[1] = -dx;
+            // print("up\n",.{});
+        // }else if(rl.isKeyDown(rl.KeyboardKey.down)){
+            // g.player.vel[1] = dx;
+            // print("down\n",.{});
+        // }else {
+            // g.player.vel[1] = 0;
+        // }
+        const newpos1=g.player.pos+g.player.vel;
+        const col1 = isPlayerMoveValid(g, newpos1);
+        g.player.vel[1]= if (g.player.vel[1]<=g.player.maxvel[1]) g.player.vel[1]+g.gravity else g.player.maxvel[1];
+        const newpos2=g.player.pos+g.player.vel;
+        const col2= isPlayerMoveValid(g, newpos2);
+        if (col2 and col1){
+            g.player.vel=Vec2i{0,0};
+        }else if(col2 and !col1){
+            g.player.vel[1] = 0;
+            g.player.pos=newpos1;
+        }else{
+            g.player.pos=newpos2;
+        }
+    }
+
     pub fn run(self:*Game) void{
         rl.initWindow(self.screenWidth, self.screenHeight, "raylib-zig [core] example - basic window");
         defer rl.closeWindow(); // Close window and OpenGL context
-        rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
+        rl.setTargetFPS(self.fps); // Set our game to run at 60 frames-per-second
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
             rl.beginDrawing();
             defer rl.endDrawing();
             rl.clearBackground(.black);
             // rl.drawText("Congrats! You created your first window!", 190, 200, 20, .light_gray);
             //----------------------------------------------------------------------------------
+            self.process();
             self.draw();
         }
     }
