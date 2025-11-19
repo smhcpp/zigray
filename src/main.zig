@@ -10,10 +10,10 @@ pub fn toVec2i(vec: rl.Vector2) Vec2i {
     return .{ @intFromFloat(vec.x), @intFromFloat(vec.y) };
 }
 
-pub fn iToVec2f(v:Vec2i) Vec2f{
+pub fn iToVec2f(v: Vec2i) Vec2f {
     return .{ @floatFromInt(v[0]), @floatFromInt(v[1]) };
 }
-pub fn fToVec2i(v:Vec2f) Vec2i{
+pub fn fToVec2i(v: Vec2f) Vec2i {
     return .{ @intFromFloat(v[0]), @intFromFloat(v[1]) };
 }
 
@@ -41,8 +41,8 @@ const Player = struct {
     r: i32 = 10,
     color: rl.Color = .blue,
     vel: Vec2i = Vec2i{ 0, 0 },
-    maxvel: Vec2i = Vec2i{ 300, 300 },
-    jump_power: i32 = 300,
+    maxvel: Vec2i = Vec2i{ 300, 500 },
+    jump_power: i32 = 800,
 
     pub fn draw(self: *Player) void {
         const baspos = toRLVec(self.pos);
@@ -99,7 +99,7 @@ pub const Game = struct {
     pub const TileNumberY: i32 = 20;
     pub const TileSizeVec2i = Vec2i{ TileSize, TileSize };
 
-    fps: i32 = 60,
+    fps: i32 = 240,
     gravity: i32 = 400,
     friction: i32 = 5,
     dt: f32 = undefined,
@@ -199,10 +199,10 @@ pub const Game = struct {
         g.updateInputs();
         if (g.inputs.left) {
             g.player.vel[0] = -g.player.maxvel[0];
-            print("left: \n", .{});
+            // print("left: \n", .{});
         } else if (g.inputs.right) {
             g.player.vel[0] = g.player.maxvel[0];
-            print("right: \n", .{});
+            // print("right: \n", .{});
         } else {
             if (g.player.vel[0] > 0) g.player.vel[0] -= g.friction;
             if (g.player.vel[0] < 0) g.player.vel[0] += g.friction;
@@ -219,20 +219,28 @@ pub const Game = struct {
         // }else {
         // g.player.vel[1] = 0;
         // }
-        const newpos1 = g.player.pos + fToVec2i(Vec2f{iToF32(g.player.vel[0]),0} * Vec2f{g.dt, g.dt});
+
+        // Horizental movement checking:
+        const newpos1 = g.player.pos + fToVec2i(Vec2f{ iToF32(g.player.vel[0]), 0 } * Vec2f{ g.dt, g.dt });
         // print("position change: {}\n", .{newpos1-g.player.pos});
         const col1 = isPlayerMoveValid(g, newpos1);
-        g.player.vel[1] = if (g.player.vel[1] <= g.player.maxvel[1]) g.player.vel[1] + fToI32(iToF32(g.gravity) * g.dt) else g.player.maxvel[1];
+
+        // Horizental and Vertical movement checking
+        const gr = if (g.player.vel[1] < 0) fToI32(iToF32(2 * g.gravity) * g.dt) else fToI32(iToF32(g.gravity) * g.dt);
+        g.player.vel[1] = if (g.player.vel[1] <= g.player.maxvel[1]) g.player.vel[1] + gr else g.player.maxvel[1];
         // y= y0 + v*dt +1/2 * g* dt2
-        const newpos2 = g.player.pos + fToVec2i(iToVec2f(g.player.vel) * Vec2f{g.dt, g.dt});
+        const newpos2 = g.player.pos + fToVec2i(iToVec2f(g.player.vel) * Vec2f{ g.dt, g.dt });
         // print("position change: {}\n", .{newpos2-g.player.pos});
         // print("--------------------\n", .{});
         const col2 = isPlayerMoveValid(g, newpos2);
+        // print("Player velocity: {}\n", .{g.player.vel});
         if (col2 and col1) {
             g.player.vel = Vec2i{ 0, 0 };
         } else if (col2 and !col1) {
             g.player.vel[1] = 0;
             g.player.pos = newpos1;
+            // print("Player bottom position: {}\n", .{g.player.pos + Vec2i{ 0, 2*g.player.r }});
+            // std.process.exit(0);
         } else {
             g.player.pos = newpos2;
         }
@@ -241,14 +249,20 @@ pub const Game = struct {
     pub fn run(self: *Game) void {
         rl.initWindow(self.screenWidth, self.screenHeight, "raylib-zig [core] example - basic window");
         defer rl.closeWindow(); // Close window and OpenGL context
+        // const ofps: i32 = 240;
         rl.setTargetFPS(self.fps); // Set our game to run at 60 frames-per-second
+        // var bucket: f32 = 0;
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
             rl.beginDrawing();
             defer rl.endDrawing();
             rl.clearBackground(.black);
             // rl.drawText("Congrats! You created your first window!", 190, 200, 20, .light_gray);
             //----------------------------------------------------------------------------------
+            // bucket += 1 / iToF32(ofps);
+            // if (bucket >= iToF32(self.fps)) {
+            // bucket = 0;
             self.process();
+            // }
             self.draw();
         }
     }
