@@ -39,19 +39,19 @@ pub fn isColPlayerPlatform(player: *Player, plat: Platform) bool {
 const Player = struct {
     pos: Vec2i,
     r: i32 = 10,
-    color: rl.Color = .blue,
+    color: rl.Color = .red,
     vel: Vec2i = Vec2i{ 0, 0 },
     maxvel: Vec2i = Vec2i{ 300, 500 },
     jump_power: i32 = 800,
 
-    pub fn draw(self: *Player) void {
-        const baspos = toRLVec(self.pos);
-        const cir1pos = baspos.subtract(toRLVec(.{ 0, self.r }));
-        const cir2pos = baspos.add(toRLVec(.{ 0, self.r }));
-        const recpos = baspos.subtract(toRLVec(.{ self.r, self.r }));
-        rl.drawCircleV(cir1pos, iToF32(self.r), self.color);
-        rl.drawCircleV(cir2pos, iToF32(self.r), self.color);
-        rl.drawRectangleV(recpos, toRLVec(.{ self.r * 2, self.r * 2 }), self.color);
+    pub fn draw(g: *Player) void {
+        const baspos = toRLVec(g.pos);
+        const cir1pos = baspos.subtract(toRLVec(.{ 0, g.r }));
+        const cir2pos = baspos.add(toRLVec(.{ 0, g.r }));
+        const recpos = baspos.subtract(toRLVec(.{ g.r, g.r }));
+        rl.drawCircleV(cir1pos, iToF32(g.r), g.color);
+        rl.drawCircleV(cir2pos, iToF32(g.r), g.color);
+        rl.drawRectangleV(recpos, toRLVec(.{ g.r * 2, g.r * 2 }), g.color);
     }
 };
 
@@ -99,7 +99,8 @@ pub const Game = struct {
     pub const TileNumberY: i32 = 20;
     pub const TileSizeVec2i = Vec2i{ TileSize, TileSize };
 
-    fps: i32 = 240,
+    pause: bool = false,
+    fps: i32 = 60,
     gravity: i32 = 400,
     friction: i32 = 5,
     dt: f32 = undefined,
@@ -118,6 +119,7 @@ pub const Game = struct {
         jump: bool,
         dash: bool,
         attack: bool,
+        escape: bool,
     } = .{
         .right = false,
         .left = false,
@@ -126,6 +128,7 @@ pub const Game = struct {
         .jump = false,
         .dash = false,
         .attack = false,
+        .escape = false,
     },
 
     pub fn init(allocator: std.mem.Allocator) !*Game {
@@ -147,25 +150,27 @@ pub const Game = struct {
         g.inputs.jump = rl.isKeyDown(rl.KeyboardKey.space);
         g.inputs.dash = rl.isKeyDown(rl.KeyboardKey.e);
         g.inputs.attack = rl.isKeyDown(rl.KeyboardKey.r);
+        g.inputs.escape = rl.isKeyPressed(rl.KeyboardKey.escape);
+        print("escape: {}\n", .{g.inputs.escape});
     }
 
-    fn setup(self: *Game) !void {
-        self.dt = 1.0 / iToF32(self.fps);
-        self.dt2 = self.dt * self.dt;
-        self.player = Player{
-            .pos = .{ @divTrunc(self.screenWidth, 2), @divTrunc(self.screenHeight, 2) },
+    fn setup(g: *Game) !void {
+        g.dt = 1.0 / iToF32(g.fps);
+        g.dt2 = g.dt * g.dt;
+        g.player = Player{
+            .pos = .{ @divTrunc(g.screenWidth, 2), @divTrunc(g.screenHeight, 2) },
         };
 
-        try self.platforms.append(self.allocator, Platform{
+        try g.platforms.append(g.allocator, Platform{
             .pos = .{ 3, 5 },
             .size = .{ 5, 7 },
         });
 
-        try self.platforms.append(self.allocator, Platform{
+        try g.platforms.append(g.allocator, Platform{
             .pos = .{ 0, 19 },
             .size = .{ 32, 1 },
         });
-        for (self.platforms.items) |platform| {
+        for (g.platforms.items) |platform| {
             var i: usize = @intCast(platform.pos[0]);
             var j: usize = undefined;
             const imax: usize = @intCast(platform.pos[0] + platform.size[0]);
@@ -173,26 +178,26 @@ pub const Game = struct {
             while (i < imax) : (i += 1) {
                 j = @intCast(platform.pos[1]);
                 while (j < jmax) : (j += 1) {
-                    try self.tileset.put(.{ @intCast(i), @intCast(j) }, .block);
+                    try g.tileset.put(.{ @intCast(i), @intCast(j) }, .block);
                 }
             }
         }
     }
 
-    fn draw(self: *Game) void {
-        for (self.platforms.items) |platform| {
+    fn draw(g: *Game) void {
+        for (g.platforms.items) |platform| {
             rl.drawRectangleV(toRLVec(platform.pos * Vec2i{ TileSize, TileSize }), toRLVec(platform.size * Vec2i{ TileSize, TileSize }), platform.color);
         }
-        self.drawTileLines();
+        g.drawTileLines();
     }
 
-    fn drawTileLines(self: *Game) void {
-        var iter = self.tileset.iterator();
+    fn drawTileLines(g: *Game) void {
+        var iter = g.tileset.iterator();
         while (iter.next()) |entry| {
             const pos = entry.key_ptr.* * TileSizeVec2i;
             rl.drawRectangleLines(pos[0], pos[1], TileSize, TileSize, .yellow);
         }
-        self.player.draw();
+        g.player.draw();
     }
 
     pub fn process(g: *Game) void {
@@ -246,30 +251,33 @@ pub const Game = struct {
         }
     }
 
-    pub fn run(self: *Game) void {
-        rl.initWindow(self.screenWidth, self.screenHeight, "raylib-zig [core] example - basic window");
+    pub fn run(g: *Game) void {
+        rl.initWindow(g.screenWidth, g.screenHeight, "raylib-zig [core] example - basic window");
         defer rl.closeWindow(); // Close window and OpenGL context
         // const ofps: i32 = 240;
-        rl.setTargetFPS(self.fps); // Set our game to run at 60 frames-per-second
+        rl.setExitKey(rl.KeyboardKey.null);
+        rl.setTargetFPS(g.fps); // Set our game to run at 60 frames-per-second
         // var bucket: f32 = 0;
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
+            if (g.inputs.escape) g.pause = !g.pause;
             rl.beginDrawing();
             defer rl.endDrawing();
             rl.clearBackground(.black);
             // rl.drawText("Congrats! You created your first window!", 190, 200, 20, .light_gray);
             //----------------------------------------------------------------------------------
             // bucket += 1 / iToF32(ofps);
-            // if (bucket >= iToF32(self.fps)) {
+            // if (bucket >= iToF32(g.fps)) {
             // bucket = 0;
-            self.process();
-            // }
-            self.draw();
+            if (!g.pause) {
+                g.process();
+            }
+            g.draw();
         }
     }
-    pub fn deinit(self: *Game) void {
-        self.tileset.deinit();
-        self.platforms.deinit(self.allocator);
-        self.allocator.destroy(self);
+    pub fn deinit(g: *Game) void {
+        g.tileset.deinit();
+        g.platforms.deinit(g.allocator);
+        g.allocator.destroy(g);
     }
 };
 
