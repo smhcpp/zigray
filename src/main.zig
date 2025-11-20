@@ -1,5 +1,6 @@
 const rl = @import("raylib");
 const std = @import("std");
+const math = std.math;
 const print = std.debug.print;
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
@@ -31,7 +32,8 @@ pub fn isColRecRec(pos1: Vec2i, size1: Vec2i, pos2: Vec2i, size2: Vec2i) bool {
     return false;
 }
 
-pub fn isColPlayerPlatform(player: *Player, plat: Platform) bool {
+pub fn isColCapRec(player: *Player, plat: Platform) bool {
+    // you must check if capsule circles collide with plat rectangle.
     return isColRecRec(player.pos, Vec2i{ 2 * player.r, 2 * player.r }, plat.pos, plat.size);
 }
 /// radius is the radius of half circles on top and bottom of capsule
@@ -82,11 +84,11 @@ pub const Side = enum {
 
 /// This function will return where player is with respect to a tile
 /// so if player is on top left of the tile it should return tl
-pub fn getPlayerTileSide(charcoords:Vec2i,tilecoords:Vec2i) Side{
-    const left= g.player.pos[0] < tilecoords[0]*Game.TileSize;
-    const right = g.player.pos[0] > tilecoords[0]*Game.TileSize + Game.TileSize;
-    const top = g.player.pos[1] < tilecoords[1]*Game.TileSize;
-    const bot = g.player.pos[1] > tilecoords[1]*Game.TileSize + Game.TileSize;
+pub fn getPlayerTileSide(g: *Game, tilecoords: Vec2i) Side {
+    const left = g.player.pos[0] < tilecoords[0] * Game.TileSize;
+    const right = g.player.pos[0] > tilecoords[0] * Game.TileSize + Game.TileSize;
+    const top = g.player.pos[1] < tilecoords[1] * Game.TileSize;
+    const bot = g.player.pos[1] > tilecoords[1] * Game.TileSize + Game.TileSize;
     if (left and top) return .tl;
     if (right and top) return .tr;
     if (left and bot) return .bl;
@@ -98,15 +100,27 @@ pub fn getPlayerTileSide(charcoords:Vec2i,tilecoords:Vec2i) Side{
     return .tl;
 }
 
-pub fn isPlayerMoveValid(g: *Game, prepos: Vec2i, newpos: Vec2i) ?Vec2i {
-    const left = if (prepos[0] < newpos[0]) prepos[0] else newpos[0];
-    const right = if (prepos[0] > newpos[0]) prepos[0] else newpos[0];
-    const top = if (prepos[1] < newpos[1]) prepos[1] else newpos[1];
-    const bot = if (prepos[1] > newpos[1]) prepos[1] else newpos[1];
-    const capleft = left - g.player.r;
-    const capright = right + g.player.r;
-    const captop = top - 2 * g.player.r;
-    const capbot = bot + 2 * g.player.r;
+pub fn isPlayerMoveValid(g: *Game, newpos: Vec2i) ?Vec2i {
+    const dir = newpos - g.player.pos;
+    const distance = math.sqrt(iToF32(dir[0] * dir[0] + dir[1] * dir[1]));
+    if (distance == 0) return newpos;
+    const dirn = iToVec2f(dir) / Vec2f{distance, distance};
+    var bucket: f32 = 0;
+    const steps = [3]f32{ iToF32(g.player.r * 2 - 1), 4.0, 1.0 };
+    const lastvalues = [3]f32{ distance - steps[0] + 1, bucket + steps[0], bucket + steps[1] };
+    for (steps, 0..) |step, i| {
+        while (bucket < lastvalues[i]) : (bucket += step) {
+            const pos = g.player.pos + fToVec2i(dirn * Vec2f{ bucket + step, bucket + step });
+            if (isPlayerColliding(g,pos)) break;
+        }
+    }
+    return null;
+}
+pub fn isPlayerColliding(g: *Game,  newpos: Vec2i) bool {
+    const capleft = newpos[0] - g.player.r;
+    const capright = newpos[0] + g.player.r;
+    const captop = newpos[1] - 2 * g.player.r;
+    const capbot = newpos[1] + 2 * g.player.r;
     const imin = @divTrunc(capleft, Game.TileSize);
     const jmin = @divTrunc(captop, Game.TileSize);
     const imax = @divTrunc(capright, Game.TileSize);
@@ -116,20 +130,12 @@ pub fn isPlayerMoveValid(g: *Game, prepos: Vec2i, newpos: Vec2i) ?Vec2i {
         var j = jmin;
         while (j <= jmax) : (j += 1) {
             if (g.tileset.get(Vec2i{ i, j })) |tile| {
-                if (tile == .block) {
-                    if (g.player.pos[1] > j * Game.TileSize) {
-                        return Vec2i{ g.player.pos[0], j * Game.TileSize - 1 - 2*g.player.r };
-                    }
-                    if (g.player.)
-                }
+                if (tile == .block) return true;
             }
         }
     }
-    return null;
+    return false;
 }
-// pub const TileSet = struct{
-// tiles: std.AutoHashMap(Vec2i, TileType),
-// };
 
 pub const Game = struct {
     pub const TileSize: i32 = 32;
@@ -264,21 +270,37 @@ pub const Game = struct {
         // Horizental movement checking:
         const newpos1 = g.player.pos + fToVec2i(Vec2f{ iToF32(g.player.vel[0]), 0 } * Vec2f{ g.dt, g.dt });
         // print("position change: {}\n", .{newpos1-g.player.pos});
-        const col1 = isPlayerMoveValid(g, g.player.pos, newpos1);
+        const col1 = isPlayerMoveValid(g, newpos1);
         // Horizental and Vertical movement checking
         const gr = if (g.player.vel[1] < 0) fToI32(iToF32(2 * g.gravity) * g.dt) else fToI32(iToF32(g.gravity) * g.dt);
         g.player.vel[1] = if (g.player.vel[1] <= g.player.maxvel[1]) g.player.vel[1] + gr else g.player.maxvel[1];
         // y= y0 + v*dt +1/2 * g* dt2
         const newpos2 = g.player.pos + fToVec2i(iToVec2f(g.player.vel) * Vec2f{ g.dt, g.dt });
-        const col2 = isPlayerMoveValid(g, g.player.pos, newpos2);
-        if (col2 and col1) {
-            g.player.vel = Vec2i{ 0, 0 };
-        } else if (col2 and !col1) {
-            g.player.vel[1] = 0;
-            g.player.pos = newpos1;
-        } else {
-            g.player.pos = newpos2;
+        const col2 = isPlayerMoveValid(g, newpos2);
+        if(col1) |precol1|{
+            if(col2)|precol2|{
+                g.player.vel = Vec2i{ 0, 0 };
+                g.player.pos = precol2;
+            }else {
+                g.player.vel[0]=0;
+                g.player.pos=Vec2i{precol1[0], newpos2[1]};
+            }
+        }else{
+            if(col2)|precol2|{
+                g.player.vel[1]=0;
+                g.player.pos=Vec2i{newpos1[0], precol2[1]};
+            }else{
+                g.player.pos=newpos2;
+            }
         }
+        // if (col2 and col1) {
+            // g.player.vel = Vec2i{ 0, 0 };
+        // } else if (col2 and !col1) {
+            // g.player.vel[1] = 0;
+            // g.player.pos = newpos1;
+        // } else {
+        //     g.player.pos = newpos2;
+        // }
     }
 
     pub fn run(g: *Game) void {
