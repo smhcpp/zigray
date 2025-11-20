@@ -69,11 +69,44 @@ pub const TileType = enum {
     block,
 };
 
-pub fn isPlayerMoveValid(g: *Game, newpos: Vec2i) bool {
-    const capleft = newpos[0] - g.player.r;
-    const capright = newpos[0] + g.player.r;
-    const captop = newpos[1] - 2 * g.player.r;
-    const capbot = newpos[1] + 2 * g.player.r;
+pub const Side = enum {
+    l,
+    r,
+    t,
+    b,
+    tl,
+    tr,
+    bl,
+    br,
+};
+
+/// This function will return where player is with respect to a tile
+/// so if player is on top left of the tile it should return tl
+pub fn getPlayerTileSide(charcoords:Vec2i,tilecoords:Vec2i) Side{
+    const left= g.player.pos[0] < tilecoords[0]*Game.TileSize;
+    const right = g.player.pos[0] > tilecoords[0]*Game.TileSize + Game.TileSize;
+    const top = g.player.pos[1] < tilecoords[1]*Game.TileSize;
+    const bot = g.player.pos[1] > tilecoords[1]*Game.TileSize + Game.TileSize;
+    if (left and top) return .tl;
+    if (right and top) return .tr;
+    if (left and bot) return .bl;
+    if (right and bot) return .br;
+    if (left) return .l;
+    if (right) return .r;
+    if (top) return .t;
+    if (bot) return .b;
+    return .tl;
+}
+
+pub fn isPlayerMoveValid(g: *Game, prepos: Vec2i, newpos: Vec2i) ?Vec2i {
+    const left = if (prepos[0] < newpos[0]) prepos[0] else newpos[0];
+    const right = if (prepos[0] > newpos[0]) prepos[0] else newpos[0];
+    const top = if (prepos[1] < newpos[1]) prepos[1] else newpos[1];
+    const bot = if (prepos[1] > newpos[1]) prepos[1] else newpos[1];
+    const capleft = left - g.player.r;
+    const capright = right + g.player.r;
+    const captop = top - 2 * g.player.r;
+    const capbot = bot + 2 * g.player.r;
     const imin = @divTrunc(capleft, Game.TileSize);
     const jmin = @divTrunc(captop, Game.TileSize);
     const imax = @divTrunc(capright, Game.TileSize);
@@ -83,11 +116,16 @@ pub fn isPlayerMoveValid(g: *Game, newpos: Vec2i) bool {
         var j = jmin;
         while (j <= jmax) : (j += 1) {
             if (g.tileset.get(Vec2i{ i, j })) |tile| {
-                if (tile == .block) return true;
+                if (tile == .block) {
+                    if (g.player.pos[1] > j * Game.TileSize) {
+                        return Vec2i{ g.player.pos[0], j * Game.TileSize - 1 - 2*g.player.r };
+                    }
+                    if (g.player.)
+                }
             }
         }
     }
-    return false;
+    return null;
 }
 // pub const TileSet = struct{
 // tiles: std.AutoHashMap(Vec2i, TileType),
@@ -151,7 +189,8 @@ pub const Game = struct {
         g.inputs.dash = rl.isKeyDown(rl.KeyboardKey.e);
         g.inputs.attack = rl.isKeyDown(rl.KeyboardKey.r);
         g.inputs.escape = rl.isKeyPressed(rl.KeyboardKey.escape);
-        print("escape: {}\n", .{g.inputs.escape});
+        if (g.inputs.escape) g.pause = !g.pause;
+        print("escape: {}\n", .{g.pause});
     }
 
     fn setup(g: *Game) !void {
@@ -201,13 +240,10 @@ pub const Game = struct {
     }
 
     pub fn process(g: *Game) void {
-        g.updateInputs();
         if (g.inputs.left) {
             g.player.vel[0] = -g.player.maxvel[0];
-            // print("left: \n", .{});
         } else if (g.inputs.right) {
             g.player.vel[0] = g.player.maxvel[0];
-            // print("right: \n", .{});
         } else {
             if (g.player.vel[0] > 0) g.player.vel[0] -= g.friction;
             if (g.player.vel[0] < 0) g.player.vel[0] += g.friction;
@@ -228,24 +264,18 @@ pub const Game = struct {
         // Horizental movement checking:
         const newpos1 = g.player.pos + fToVec2i(Vec2f{ iToF32(g.player.vel[0]), 0 } * Vec2f{ g.dt, g.dt });
         // print("position change: {}\n", .{newpos1-g.player.pos});
-        const col1 = isPlayerMoveValid(g, newpos1);
-
+        const col1 = isPlayerMoveValid(g, g.player.pos, newpos1);
         // Horizental and Vertical movement checking
         const gr = if (g.player.vel[1] < 0) fToI32(iToF32(2 * g.gravity) * g.dt) else fToI32(iToF32(g.gravity) * g.dt);
         g.player.vel[1] = if (g.player.vel[1] <= g.player.maxvel[1]) g.player.vel[1] + gr else g.player.maxvel[1];
         // y= y0 + v*dt +1/2 * g* dt2
         const newpos2 = g.player.pos + fToVec2i(iToVec2f(g.player.vel) * Vec2f{ g.dt, g.dt });
-        // print("position change: {}\n", .{newpos2-g.player.pos});
-        // print("--------------------\n", .{});
-        const col2 = isPlayerMoveValid(g, newpos2);
-        // print("Player velocity: {}\n", .{g.player.vel});
+        const col2 = isPlayerMoveValid(g, g.player.pos, newpos2);
         if (col2 and col1) {
             g.player.vel = Vec2i{ 0, 0 };
         } else if (col2 and !col1) {
             g.player.vel[1] = 0;
             g.player.pos = newpos1;
-            // print("Player bottom position: {}\n", .{g.player.pos + Vec2i{ 0, 2*g.player.r }});
-            // std.process.exit(0);
         } else {
             g.player.pos = newpos2;
         }
@@ -254,23 +284,17 @@ pub const Game = struct {
     pub fn run(g: *Game) void {
         rl.initWindow(g.screenWidth, g.screenHeight, "raylib-zig [core] example - basic window");
         defer rl.closeWindow(); // Close window and OpenGL context
-        // const ofps: i32 = 240;
         rl.setExitKey(rl.KeyboardKey.null);
         rl.setTargetFPS(g.fps); // Set our game to run at 60 frames-per-second
-        // var bucket: f32 = 0;
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
-            if (g.inputs.escape) g.pause = !g.pause;
-            rl.beginDrawing();
-            defer rl.endDrawing();
-            rl.clearBackground(.black);
-            // rl.drawText("Congrats! You created your first window!", 190, 200, 20, .light_gray);
-            //----------------------------------------------------------------------------------
-            // bucket += 1 / iToF32(ofps);
-            // if (bucket >= iToF32(g.fps)) {
-            // bucket = 0;
+            g.updateInputs();
             if (!g.pause) {
                 g.process();
             }
+
+            rl.beginDrawing();
+            defer rl.endDrawing();
+            rl.clearBackground(.black);
             g.draw();
         }
     }
