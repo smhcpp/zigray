@@ -2,9 +2,20 @@ const rl = @import("raylib");
 const std = @import("std");
 const math = std.math;
 const print = std.debug.print;
+const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
-pub fn toRLVec(vec: Vec2f) rl.Vector2 {
-    return .{ .x = vec[0], .y = vec[1] };
+pub fn toRLVec(vec: Vec2i) rl.Vector2 {
+    return .{ .x = @floatFromInt(vec[0]), .y = @floatFromInt(vec[1]) };
+}
+pub fn toVec2i(vec: rl.Vector2) Vec2i {
+    return .{ @intFromFloat(vec.x), @intFromFloat(vec.y) };
+}
+
+pub fn iToVec2f(v: Vec2i) Vec2f {
+    return .{ @floatFromInt(v[0]), @floatFromInt(v[1]) };
+}
+pub fn fToVec2i(v: Vec2f) Vec2i {
+    return .{ @intFromFloat(v[0]), @intFromFloat(v[1]) };
 }
 
 pub fn iToF32(v: i32) f32 {
@@ -15,24 +26,33 @@ pub fn fToI32(v: f32) i32 {
     return @intFromFloat(v);
 }
 
+pub fn isColRecRec(pos1: Vec2i, size1: Vec2i, pos2: Vec2i, size2: Vec2i) bool {
+    if (pos1[0] <= pos2[0] and pos1[0] + size1[0] >= pos2[0] and pos1[1] <= pos2[1] and pos1[1] + size1[1] >= pos2[1]) return true;
+    if (pos2[0] <= pos1[0] and pos2[0] + size2[0] >= pos1[0] and pos2[1] <= pos1[1] and pos2[1] + size2[1] >= pos1[1]) return true;
+    return false;
+}
+
+pub fn isColCapRec(player: *Player, plat: Platform) bool {
+    // you must check if capsule circles collide with plat rectangle.
+    return isColRecRec(player.pos, Vec2i{ 2 * player.r, 2 * player.r }, plat.pos, plat.size);
+}
 /// radius is the radius of half circles on top and bottom of capsule
 /// height is 4*radius and width is 2*radius
 const Player = struct {
-    pos: Vec2f,
-    r: f32 = 10,
+    pos: Vec2i,
+    r: i32 = 10,
     color: rl.Color = .red,
-    vel: Vec2f = Vec2f{ 0, 0 },
-    maxvel: Vec2f = Vec2f{ 300, 500 },
-    jump_power: f32 = 800,
-    is_grounded: bool = false,
+    vel: Vec2i = Vec2i{ 0, 0 },
+    maxvel: Vec2i = Vec2i{ 300, 500 },
+    jump_power: i32 = 800,
 
     pub fn draw(g: *Player) void {
         const baspos = toRLVec(g.pos);
         const cir1pos = baspos.subtract(toRLVec(.{ 0, g.r }));
         const cir2pos = baspos.add(toRLVec(.{ 0, g.r }));
         const recpos = baspos.subtract(toRLVec(.{ g.r, g.r }));
-        rl.drawCircleV(cir1pos, g.r, g.color);
-        rl.drawCircleV(cir2pos, g.r, g.color);
+        rl.drawCircleV(cir1pos, iToF32(g.r), g.color);
+        rl.drawCircleV(cir2pos, iToF32(g.r), g.color);
         rl.drawRectangleV(recpos, toRLVec(.{ g.r * 2, g.r * 2 }), g.color);
     }
 };
@@ -41,8 +61,8 @@ const Player = struct {
 /// later on we can add more complex shapes like circles or polygons
 /// if needed
 pub const Platform = struct {
-    pos: Vec2f,
-    size: Vec2f,
+    pos: Vec2i,
+    size: Vec2i,
     color: rl.Color = .gray,
 };
 
@@ -51,112 +71,82 @@ pub const TileType = enum {
     block,
 };
 
-pub fn movePlayer(g: *Game) void {
-    const separation = g.player.vel * Vec2f{ g.dt, g.dt };
-    const stepsize = g.player.r * 2 - 1;
-    const step = separation / Vec2f{ stepsize, stepsize };
-    var bucket: Vec2f = Vec2f{ 0, 0 };
-    var nocollision = false;
-    while (!nocollision and bucket[0] <= separation[0] and bucket[1] <= separation[1])) : (bucket += step) {
-        for (g.platforms.items) |plat| {
-            if (checkPlayerCollision(&g.player, plat)) {
-                nocollision = true;
+pub const Side = enum {
+    l,
+    r,
+    t,
+    b,
+    tl,
+    tr,
+    bl,
+    br,
+};
+
+/// This function will return where player is with respect to a tile
+/// so if player is on top left of the tile it should return tl
+pub fn getPlayerTileSide(g: *Game, tilecoords: Vec2i) Side {
+    const left = g.player.pos[0] < tilecoords[0] * Game.TileSize;
+    const right = g.player.pos[0] > tilecoords[0] * Game.TileSize + Game.TileSize;
+    const top = g.player.pos[1] < tilecoords[1] * Game.TileSize;
+    const bot = g.player.pos[1] > tilecoords[1] * Game.TileSize + Game.TileSize;
+    if (left and top) return .tl;
+    if (right and top) return .tr;
+    if (left and bot) return .bl;
+    if (right and bot) return .br;
+    if (left) return .l;
+    if (right) return .r;
+    if (top) return .t;
+    if (bot) return .b;
+    return .tl;
+}
+
+pub fn isPlayerMoveValid(g: *Game, newpos: Vec2i) ?Vec2i {
+    const dir = newpos - g.player.pos;
+    const distance = math.sqrt(iToF32(dir[0] * dir[0] + dir[1] * dir[1]));
+    if (distance == 0) return newpos;
+    const dirn = iToVec2f(dir) / Vec2f{distance, distance};
+    var bucket: f32 = 0;
+    const steps = [3]f32{ iToF32(g.player.r * 2 - 1), 4.0, 1.0 };
+    const lastvalues = [3]f32{ distance - steps[0] + 1, bucket + steps[0], bucket + steps[1] };
+    for (steps, 0..) |step, i| {
+        while (bucket < lastvalues[i]) : (bucket += step) {
+            const pos = g.player.pos + fToVec2i(dirn * Vec2f{ bucket + step, bucket + step });
+            if (isPlayerColliding(g,pos)) break;
+        }
+    }
+    return null;
+}
+pub fn isPlayerColliding(g: *Game,  newpos: Vec2i) bool {
+    const capleft = newpos[0] - g.player.r;
+    const capright = newpos[0] + g.player.r;
+    const captop = newpos[1] - 2 * g.player.r;
+    const capbot = newpos[1] + 2 * g.player.r;
+    const imin = @divTrunc(capleft, Game.TileSize);
+    const jmin = @divTrunc(captop, Game.TileSize);
+    const imax = @divTrunc(capright, Game.TileSize);
+    const jmax = @divTrunc(capbot, Game.TileSize);
+    var i = imin;
+    while (i <= imax) : (i += 1) {
+        var j = jmin;
+        while (j <= jmax) : (j += 1) {
+            if (g.tileset.get(Vec2i{ i, j })) |tile| {
+                if (tile == .block) return true;
             }
         }
     }
-}
-pub fn checkPlayerCollision(p: *Player, plat: Platform) bool {
-    const captop = p.pos[1] - p.r;
-    const capbot = p.pos[1] + p.r;
-    const cappos = p.pos[0];
-    // find closest point on platform to the capsule's center
-    const closest_plat_point_x = math.clamp(cappos, plat.pos[0], plat.pos[0] + plat.size[0]);
-    const closest_plat_point_y = math.clamp(cappos, plat.pos[1], plat.pos[1] + plat.size[1]);
-
-    // find closest point on capsule central vertical segment to the closest point of the platform
-    // that we found above
-    const closest_cap_point_y = math.clamp(closest_plat_point_y, captop, capbot);
-    const closest_cap_point_x = cappos;
-
-    // find their distance^2:
-    const dx = closest_cap_point_x - closest_plat_point_x;
-    const dy = closest_cap_point_y - closest_plat_point_y;
-    const dist2 = dx * dx + dy * dy;
-
-    // if there is collision
-    if (dist2 < p.r * p.r and dist2 > 0) {
-        const dist: i32 = @intCast(math.sqrt(@intCast(dist2)));
-        const overlap = iToF32(p.r - dist);
-        const dx_norm = iToF32(dx) / iToF32(dist);
-        const dy_norm = iToF32(dy) / iToF32(dist);
-
-        p.pos[0] += fToI32(dx_norm * overlap);
-        p.pos[1] += fToI32(dy_norm * overlap);
-
-        // if player is moving down and colliding with platform
-        if (dx_norm < -0.7) {
-            p.is_grounded = true;
-            if (p.vel[1] > 0) p.vel[1] = 0;
-        }
-        // if player is hitting the platform from below
-        if (dy_norm > 0.7 and p.vel[1] < 0) {
-            p.vel[1] = 0;
-        }
-        // if player is hitting the platform from the side
-        if (@abs(dx_norm) > 0.7) {
-            p.vel[0] = 0;
-        }
-        return true;
-    }
     return false;
 }
-// pub fn isPlayerMoveValid(g: *Game, newpos: Vec2i) ?Vec2i {
-//     const dir = newpos - g.player.pos;
-//     const distance = math.sqrt(iToF32(dir[0] * dir[0] + dir[1] * dir[1]));
-//     if (distance == 0) return newpos;
-//     const dirn = iToVec2f(dir) / Vec2f{distance, distance};
-//     var bucket: f32 = 0;
-//     const steps = [3]f32{ iToF32(g.player.r * 2 - 1), 4.0, 1.0 };
-//     const lastvalues = [3]f32{ distance - steps[0] + 1, bucket + steps[0], bucket + steps[1] };
-//     for (steps, 0..) |step, i| {
-//         while (bucket < lastvalues[i]) : (bucket += step) {
-//             const pos = g.player.pos + fToVec2i(dirn * Vec2f{ bucket + step, bucket + step });
-//             if (isPlayerColliding(g,pos)) break;
-//         }
-//     }
-//     return null;
-// }
-// pub fn isPlayerColliding(g: *Game,  newpos: Vec2i) bool {
-//     const capleft = newpos[0] - g.player.r;
-//     const capright = newpos[0] + g.player.r;
-//     const captop = newpos[1] - 2 * g.player.r;
-//     const capbot = newpos[1] + 2 * g.player.r;
-//     const imin = @divTrunc(capleft, Game.TileSize);
-//     const jmin = @divTrunc(captop, Game.TileSize);
-//     const imax = @divTrunc(capright, Game.TileSize);
-//     const jmax = @divTrunc(capbot, Game.TileSize);
-//     var i = imin;
-//     while (i <= imax) : (i += 1) {
-//         var j = jmin;
-//         while (j <= jmax) : (j += 1) {
-//             if (g.tileset.get(Vec2i{ i, j })) |tile| {
-//                 if (tile == .block) return true;
-//             }
-//         }
-//     }
-//     return false;
-// }
 
 pub const Game = struct {
     pub const TileSize: i32 = 32;
     pub const TileNumberX: i32 = 32;
     pub const TileNumberY: i32 = 20;
-    pub const TileSizeVec2f = Vec2f{ TileSize, TileSize };
+    pub const TileSizeVec2i = Vec2i{ TileSize, TileSize };
 
     pause: bool = false,
     fps: i32 = 60,
-    gravity: f32 = 400,
-    friction: f32 = 5,
+    gravity: i32 = 400,
+    friction: i32 = 5,
     dt: f32 = undefined,
     dt2: f32 = undefined,
     allocator: std.mem.Allocator,
@@ -164,7 +154,7 @@ pub const Game = struct {
     screenWidth: i32 = TileNumberX * TileSize,
     screenHeight: i32 = TileNumberY * TileSize,
     platforms: std.ArrayList(Platform),
-    tileset: std.AutoHashMap(Vec2f, TileType),
+    tileset: std.AutoHashMap(Vec2i, TileType),
     inputs: struct {
         right: bool,
         left: bool,
@@ -278,15 +268,39 @@ pub const Game = struct {
         // }
 
         // Horizental movement checking:
-        // const newpos1 = g.player.pos + fToVec2i(Vec2f{ iToF32(g.player.vel[0]), 0 } * Vec2f{ g.dt, g.dt });
+        const newpos1 = g.player.pos + fToVec2i(Vec2f{ iToF32(g.player.vel[0]), 0 } * Vec2f{ g.dt, g.dt });
         // print("position change: {}\n", .{newpos1-g.player.pos});
-        // const col1 = isPlayerMoveValid(g, newpos1);
+        const col1 = isPlayerMoveValid(g, newpos1);
         // Horizental and Vertical movement checking
         const gr = if (g.player.vel[1] < 0) fToI32(iToF32(2 * g.gravity) * g.dt) else fToI32(iToF32(g.gravity) * g.dt);
         g.player.vel[1] = if (g.player.vel[1] <= g.player.maxvel[1]) g.player.vel[1] + gr else g.player.maxvel[1];
         // y= y0 + v*dt +1/2 * g* dt2
-        // const newpos2 = g.player.pos + fToVec2i(iToVec2f(g.player.vel) * Vec2f{ g.dt, g.dt });
-        movePlayer(g);
+        const newpos2 = g.player.pos + fToVec2i(iToVec2f(g.player.vel) * Vec2f{ g.dt, g.dt });
+        const col2 = isPlayerMoveValid(g, newpos2);
+        if(col1) |precol1|{
+            if(col2)|precol2|{
+                g.player.vel = Vec2i{ 0, 0 };
+                g.player.pos = precol2;
+            }else {
+                g.player.vel[0]=0;
+                g.player.pos=Vec2i{precol1[0], newpos2[1]};
+            }
+        }else{
+            if(col2)|precol2|{
+                g.player.vel[1]=0;
+                g.player.pos=Vec2i{newpos1[0], precol2[1]};
+            }else{
+                g.player.pos=newpos2;
+            }
+        }
+        // if (col2 and col1) {
+            // g.player.vel = Vec2i{ 0, 0 };
+        // } else if (col2 and !col1) {
+            // g.player.vel[1] = 0;
+            // g.player.pos = newpos1;
+        // } else {
+        //     g.player.pos = newpos2;
+        // }
     }
 
     pub fn run(g: *Game) void {
