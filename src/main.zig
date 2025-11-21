@@ -3,8 +3,17 @@ const std = @import("std");
 const math = std.math;
 const print = std.debug.print;
 const Vec2f = @Vector(2, f32);
+const Vec2i = @Vector(2, i32);
 pub fn toRLVec(vec: Vec2f) rl.Vector2 {
     return .{ .x = vec[0], .y = vec[1] };
+}
+
+pub fn iToVec2f(v: Vec2i) Vec2f {
+    return .{ @floatFromInt(v[0]), @floatFromInt(v[1]) };
+}
+
+pub fn iToVec2i(v: Vec2f) Vec2i {
+    return .{ @intFromFloat(v[0]), @intFromFloat(v[1]) };
 }
 
 pub fn iToF32(v: i32) f32 {
@@ -20,7 +29,7 @@ pub fn fToI32(v: f32) i32 {
 const Player = struct {
     pos: Vec2f,
     r: f32 = 10,
-    color: rl.Color = .red,
+    color: rl.Color = .blue,
     vel: Vec2f = Vec2f{ 0, 0 },
     maxvel: Vec2f = Vec2f{ 300, 500 },
     jump_power: f32 = 800,
@@ -52,26 +61,40 @@ pub const TileType = enum {
 };
 
 pub fn movePlayer(g: *Game) void {
-    const separation = g.player.vel * Vec2f{ g.dt, g.dt };
-    const stepsize = g.player.r * 2 - 1;
-    const step = separation / Vec2f{ stepsize, stepsize };
-    var bucket: Vec2f = Vec2f{ 0, 0 };
-    var nocollision = false;
-    while (!nocollision and bucket[0] <= separation[0] and bucket[1] <= separation[1])) : (bucket += step) {
+    const total_delta = g.player.vel * Vec2f{ g.dt, g.dt };
+    const stepsize = Vec2f{ 2 * g.player.r - 1, 4 * g.player.r - 1 };
+    const temp = total_delta / stepsize;
+    const number_of_steps = @max(@floor(@abs(temp[0])), @floor(@abs(temp[1]))) + 1;
+    var bucket = Vec2f{ 0, 0 };
+    var poschange = Vec2f{ 0, 0 };
+    const velocity_step = total_delta / Vec2f{ number_of_steps, number_of_steps };
+    var i: f32 = 0;
+    var retvel = Vec2f{ 0, 0 };
+    var collision = false;
+    while (!collision and i < number_of_steps) : (i += 1) {
+        bucket += velocity_step;
         for (g.platforms.items) |plat| {
-            if (checkPlayerCollision(&g.player, plat)) {
-                nocollision = true;
+            retvel = checkPlayerCollision(g.player.pos + bucket, g.player.r, g.player.vel, plat, &poschange);
+            if (bucket[0] != retvel[0] or bucket[1] != retvel[1]) {
+                collision = true;
             }
         }
     }
+    if (collision) {
+        g.player.pos += poschange;
+    } else {
+        g.player.pos += total_delta;
+    }
+    g.player.vel = retvel;
 }
-pub fn checkPlayerCollision(p: *Player, plat: Platform) bool {
-    const captop = p.pos[1] - p.r;
-    const capbot = p.pos[1] + p.r;
-    const cappos = p.pos[0];
+pub fn checkPlayerCollision(pos: Vec2f, capr: f32, vel: Vec2f, plat: Platform, poschange: *Vec2f) Vec2f {
+    var retvel = vel;
+    const captop = pos[1] - capr;
+    const capbot = pos[1] + capr;
+    const cappos = pos[0];
     // find closest point on platform to the capsule's center
-    const closest_plat_point_x = math.clamp(cappos, plat.pos[0], plat.pos[0] + plat.size[0]);
-    const closest_plat_point_y = math.clamp(cappos, plat.pos[1], plat.pos[1] + plat.size[1]);
+    const closest_plat_point_x = math.clamp(cappos, plat.pos[0] * Game.TileSize, plat.pos[0] * Game.TileSize + plat.size[0] * Game.TileSize);
+    const closest_plat_point_y = math.clamp(cappos, plat.pos[1] * Game.TileSize, plat.pos[1] * Game.TileSize + plat.size[1] * Game.TileSize);
 
     // find closest point on capsule central vertical segment to the closest point of the platform
     // that we found above
@@ -84,48 +107,30 @@ pub fn checkPlayerCollision(p: *Player, plat: Platform) bool {
     const dist2 = dx * dx + dy * dy;
 
     // if there is collision
-    if (dist2 < p.r * p.r and dist2 > 0) {
-        const dist: i32 = @intCast(math.sqrt(@intCast(dist2)));
-        const overlap = iToF32(p.r - dist);
-        const dx_norm = iToF32(dx) / iToF32(dist);
-        const dy_norm = iToF32(dy) / iToF32(dist);
+    if (dist2 < capr * capr and dist2 > 0) {
+        const dist = math.sqrt(dist2);
+        const overlap = capr - dist;
+        const dx_norm = dx / dist;
+        const dy_norm = dy / dist;
 
-        p.pos[0] += fToI32(dx_norm * overlap);
-        p.pos[1] += fToI32(dy_norm * overlap);
+        poschange[0] += dx_norm * overlap;
+        poschange[1] += dy_norm * overlap;
 
         // if player is moving down and colliding with platform
-        if (dx_norm < -0.7) {
-            p.is_grounded = true;
-            if (p.vel[1] > 0) p.vel[1] = 0;
+        if (dy_norm < -0.7) {
+            if (vel[1] > 0) retvel[1] = 0;
         }
         // if player is hitting the platform from below
-        if (dy_norm > 0.7 and p.vel[1] < 0) {
-            p.vel[1] = 0;
+        if (dy_norm > 0.7 and retvel[1] < 0) {
+            retvel[1] = 0;
         }
         // if player is hitting the platform from the side
         if (@abs(dx_norm) > 0.7) {
-            p.vel[0] = 0;
+            retvel[0] = 0;
         }
-        return true;
     }
-    return false;
+    return retvel;
 }
-// pub fn isPlayerMoveValid(g: *Game, newpos: Vec2i) ?Vec2i {
-//     const dir = newpos - g.player.pos;
-//     const distance = math.sqrt(iToF32(dir[0] * dir[0] + dir[1] * dir[1]));
-//     if (distance == 0) return newpos;
-//     const dirn = iToVec2f(dir) / Vec2f{distance, distance};
-//     var bucket: f32 = 0;
-//     const steps = [3]f32{ iToF32(g.player.r * 2 - 1), 4.0, 1.0 };
-//     const lastvalues = [3]f32{ distance - steps[0] + 1, bucket + steps[0], bucket + steps[1] };
-//     for (steps, 0..) |step, i| {
-//         while (bucket < lastvalues[i]) : (bucket += step) {
-//             const pos = g.player.pos + fToVec2i(dirn * Vec2f{ bucket + step, bucket + step });
-//             if (isPlayerColliding(g,pos)) break;
-//         }
-//     }
-//     return null;
-// }
 // pub fn isPlayerColliding(g: *Game,  newpos: Vec2i) bool {
 //     const capleft = newpos[0] - g.player.r;
 //     const capright = newpos[0] + g.player.r;
@@ -148,9 +153,9 @@ pub fn checkPlayerCollision(p: *Player, plat: Platform) bool {
 // }
 
 pub const Game = struct {
-    pub const TileSize: i32 = 32;
-    pub const TileNumberX: i32 = 32;
-    pub const TileNumberY: i32 = 20;
+    pub const TileSize: f32 = 32;
+    pub const TileNumberX: f32 = 32;
+    pub const TileNumberY: f32 = 20;
     pub const TileSizeVec2f = Vec2f{ TileSize, TileSize };
 
     pause: bool = false,
@@ -161,10 +166,10 @@ pub const Game = struct {
     dt2: f32 = undefined,
     allocator: std.mem.Allocator,
     player: Player = undefined,
-    screenWidth: i32 = TileNumberX * TileSize,
-    screenHeight: i32 = TileNumberY * TileSize,
+    screenWidth: i32 = fToI32(TileNumberX * TileSize),
+    screenHeight: i32 = fToI32(TileNumberY * TileSize),
     platforms: std.ArrayList(Platform),
-    tileset: std.AutoHashMap(Vec2f, TileType),
+    tileset: std.AutoHashMap(Vec2i, TileType),
     inputs: struct {
         right: bool,
         left: bool,
@@ -205,15 +210,17 @@ pub const Game = struct {
         g.inputs.dash = rl.isKeyDown(rl.KeyboardKey.e);
         g.inputs.attack = rl.isKeyDown(rl.KeyboardKey.r);
         g.inputs.escape = rl.isKeyPressed(rl.KeyboardKey.escape);
-        if (g.inputs.escape) g.pause = !g.pause;
-        print("escape: {}\n", .{g.pause});
+        if (g.inputs.escape) {
+            g.pause = !g.pause;
+            print("Pause: {}\n", .{g.pause});
+        }
     }
 
     fn setup(g: *Game) !void {
         g.dt = 1.0 / iToF32(g.fps);
         g.dt2 = g.dt * g.dt;
         g.player = Player{
-            .pos = .{ @divTrunc(g.screenWidth, 2), @divTrunc(g.screenHeight, 2) },
+            .pos = .{ iToF32(@divTrunc(g.screenWidth, 2)), iToF32(@divTrunc(g.screenHeight, 2)) },
         };
 
         try g.platforms.append(g.allocator, Platform{
@@ -226,12 +233,12 @@ pub const Game = struct {
             .size = .{ 32, 1 },
         });
         for (g.platforms.items) |platform| {
-            var i: usize = @intCast(platform.pos[0]);
+            var i: usize = @intFromFloat(platform.pos[0]);
             var j: usize = undefined;
-            const imax: usize = @intCast(platform.pos[0] + platform.size[0]);
-            const jmax: usize = @intCast(platform.pos[1] + platform.size[1]);
+            const imax: usize = @intFromFloat(platform.pos[0] + platform.size[0]);
+            const jmax: usize = @intFromFloat(platform.pos[1] + platform.size[1]);
             while (i < imax) : (i += 1) {
-                j = @intCast(platform.pos[1]);
+                j = @intFromFloat(platform.pos[1]);
                 while (j < jmax) : (j += 1) {
                     try g.tileset.put(.{ @intCast(i), @intCast(j) }, .block);
                 }
@@ -241,7 +248,7 @@ pub const Game = struct {
 
     fn draw(g: *Game) void {
         for (g.platforms.items) |platform| {
-            rl.drawRectangleV(toRLVec(platform.pos * Vec2i{ TileSize, TileSize }), toRLVec(platform.size * Vec2i{ TileSize, TileSize }), platform.color);
+            rl.drawRectangleV(toRLVec(platform.pos * Vec2f{ TileSize, TileSize }), toRLVec(platform.size * Vec2f{ TileSize, TileSize }), platform.color);
         }
         g.drawTileLines();
     }
@@ -249,8 +256,8 @@ pub const Game = struct {
     fn drawTileLines(g: *Game) void {
         var iter = g.tileset.iterator();
         while (iter.next()) |entry| {
-            const pos = entry.key_ptr.* * TileSizeVec2i;
-            rl.drawRectangleLines(pos[0], pos[1], TileSize, TileSize, .yellow);
+            const pos = iToVec2f(entry.key_ptr.*) * TileSizeVec2f;
+            rl.drawRectangleLines(fToI32(pos[0]), fToI32(pos[1]), fToI32(TileSize), fToI32(TileSize), .yellow);
         }
         g.player.draw();
     }
@@ -267,25 +274,9 @@ pub const Game = struct {
         if (rl.isKeyPressed(rl.KeyboardKey.space)) {
             g.player.vel[1] = -g.player.jump_power;
         }
-        // if (rl.isKeyDown(rl.KeyboardKey.up)){
-        // g.player.vel[1] = -dx;
-        // print("up\n",.{});
-        // }else if(rl.isKeyDown(rl.KeyboardKey.down)){
-        // g.player.vel[1] = dx;
-        // print("down\n",.{});
-        // }else {
-        // g.player.vel[1] = 0;
-        // }
 
-        // Horizental movement checking:
-        // const newpos1 = g.player.pos + fToVec2i(Vec2f{ iToF32(g.player.vel[0]), 0 } * Vec2f{ g.dt, g.dt });
-        // print("position change: {}\n", .{newpos1-g.player.pos});
-        // const col1 = isPlayerMoveValid(g, newpos1);
-        // Horizental and Vertical movement checking
-        const gr = if (g.player.vel[1] < 0) fToI32(iToF32(2 * g.gravity) * g.dt) else fToI32(iToF32(g.gravity) * g.dt);
+        const gr = if (g.player.vel[1] > 0) 2 * g.gravity * g.dt else g.gravity * g.dt;
         g.player.vel[1] = if (g.player.vel[1] <= g.player.maxvel[1]) g.player.vel[1] + gr else g.player.maxvel[1];
-        // y= y0 + v*dt +1/2 * g* dt2
-        // const newpos2 = g.player.pos + fToVec2i(iToVec2f(g.player.vel) * Vec2f{ g.dt, g.dt });
         movePlayer(g);
     }
 
