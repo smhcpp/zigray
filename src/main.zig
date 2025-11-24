@@ -32,7 +32,7 @@ const Player = struct {
     color: rl.Color = .blue,
     vel: Vec2f = Vec2f{ 0, 0 },
     maxvel: Vec2f = Vec2f{ 300, 500 },
-    jump_power: f32 = 800,
+    jump_power: f32 = 500,
     is_grounded: bool = false,
 
     pub fn draw(g: *Player) void {
@@ -70,21 +70,27 @@ pub fn movePlayer(g: *Game) void {
     const velocity_step = total_delta / Vec2f{ number_of_steps, number_of_steps };
     var i: f32 = 0;
     var retvel = Vec2f{ 0, 0 };
-    var collision = false;
-    while (!collision and i < number_of_steps) : (i += 1) {
+    var xcollision = false;
+    var ycollision = false;
+    while ((!xcollision or !ycollision) and i < number_of_steps) : (i += 1) {
         bucket += velocity_step;
         for (g.platforms.items) |plat| {
             retvel = checkPlayerCollision(g.player.pos + bucket, g.player.r, g.player.vel, plat, &poschange);
-            if (bucket[0] != retvel[0] or bucket[1] != retvel[1]) {
-                collision = true;
+            if (g.player.vel[0] != retvel[0]) {
+                xcollision = true;
+            }
+            if (g.player.vel[1] != retvel[1]) {
+                ycollision = true;
             }
         }
     }
-    if (collision) {
-        g.player.pos += poschange;
-    } else {
-        g.player.pos += total_delta;
+    if (ycollision){
+        retvel[1] = 0;
     }
+    if (xcollision){
+        retvel[0] = 0;
+    }
+    g.player.pos += bucket + poschange;
     g.player.vel = retvel;
 }
 pub fn checkPlayerCollision(pos: Vec2f, capr: f32, vel: Vec2f, plat: Platform, poschange: *Vec2f) Vec2f {
@@ -94,7 +100,7 @@ pub fn checkPlayerCollision(pos: Vec2f, capr: f32, vel: Vec2f, plat: Platform, p
     const cappos = pos[0];
     // find closest point on platform to the capsule's center
     const closest_plat_point_x = math.clamp(cappos, plat.pos[0] * Game.TileSize, plat.pos[0] * Game.TileSize + plat.size[0] * Game.TileSize);
-    const closest_plat_point_y = math.clamp(cappos, plat.pos[1] * Game.TileSize, plat.pos[1] * Game.TileSize + plat.size[1] * Game.TileSize);
+    const closest_plat_point_y = math.clamp(pos[1], plat.pos[1] * Game.TileSize, plat.pos[1] * Game.TileSize + plat.size[1] * Game.TileSize);
 
     // find closest point on capsule central vertical segment to the closest point of the platform
     // that we found above
