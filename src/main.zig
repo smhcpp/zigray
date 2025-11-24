@@ -31,7 +31,8 @@ const Player = struct {
     r: f32 = 10,
     color: rl.Color = .blue,
     vel: Vec2f = Vec2f{ 0, 0 },
-    maxvel: Vec2f = Vec2f{ 300, 500 },
+    maxvel: Vec2f = Vec2f{ 400, 600 },
+    speedX: f32 = 250,
     jump_power: f32 = 500,
     is_grounded: bool = false,
 
@@ -50,14 +51,15 @@ const Player = struct {
 /// later on we can add more complex shapes like circles or polygons
 /// if needed
 pub const Platform = struct {
+    collision_frame_id: i64 = 0,
+    // vision_frame_id:f64,
     pos: Vec2f,
     size: Vec2f,
     color: rl.Color = .gray,
 };
 
-pub const TileType = enum {
-    empty,
-    block,
+pub const GridCell = struct {
+    pids: std.ArrayList(usize),
 };
 
 pub fn movePlayer(g: *Game) void {
@@ -74,38 +76,52 @@ pub fn movePlayer(g: *Game) void {
     var ycollision = false;
     while ((!xcollision or !ycollision) and i < number_of_steps) : (i += 1) {
         bucket += velocity_step;
-        for (g.platforms.items) |plat| {
-            retvel = checkPlayerCollision(g.player.pos + bucket, g.player.r, g.player.vel, plat, &poschange);
-            if (g.player.vel[0] != retvel[0]) {
-                xcollision = true;
-            }
-            if (g.player.vel[1] != retvel[1]) {
-                ycollision = true;
+        const pos = g.player.pos + bucket;
+        const minpos = pos - Vec2f{ g.player.r, 2 * g.player.r };
+        const maxpos = pos + Vec2f{ g.player.r, 2 * g.player.r };
+        const minind = iToVec2i(minpos / WorldMap.GridSizeVec2f);
+        const maxind = iToVec2i(maxpos / WorldMap.GridSizeVec2f);
+        var j = minind[0];
+        var k = minind[1];
+        while (j <= maxind[0]) : (j += 1) {
+            while (k <= maxind[1]) : (k += 1) {
+                for (g.wmap.grid[@intCast(j)][@intCast(k)].pids.items) |pid| {
+                    // movement fix, platforms get processed multiple times if they exist in multiple grid cells
+                    // if (g.collision_frame_id == g.wmap.platforms.items[pid].collision_frame_id) continue;
+                    retvel = checkPlayerCollision(pos, g.player.r, g.player.vel, g.wmap.platforms.items[pid], &poschange);
+                    if (g.player.vel[0] != retvel[0]) {
+                        xcollision = true;
+                    }
+                    if (g.player.vel[1] != retvel[1]) {
+                        ycollision = true;
+                    }
+                    // g.wmap.platforms.items[pid].collision_frame_id = g.collision_frame_id;
+                }
             }
         }
     }
-    if (ycollision){
+    if (ycollision) {
         retvel[1] = 0;
     }
-    if (xcollision){
+    if (xcollision) {
         retvel[0] = 0;
     }
     g.player.pos += bucket + poschange;
     g.player.vel = retvel;
 }
+
 pub fn checkPlayerCollision(pos: Vec2f, capr: f32, vel: Vec2f, plat: Platform, poschange: *Vec2f) Vec2f {
     var retvel = vel;
     const captop = pos[1] - capr;
     const capbot = pos[1] + capr;
-    const cappos = pos[0];
     // find closest point on platform to the capsule's center
-    const closest_plat_point_x = math.clamp(cappos, plat.pos[0] * Game.TileSize, plat.pos[0] * Game.TileSize + plat.size[0] * Game.TileSize);
-    const closest_plat_point_y = math.clamp(pos[1], plat.pos[1] * Game.TileSize, plat.pos[1] * Game.TileSize + plat.size[1] * Game.TileSize);
+    const closest_plat_point_x = math.clamp(pos[0], plat.pos[0], plat.pos[0] + plat.size[0]);
+    const closest_plat_point_y = math.clamp(pos[1], plat.pos[1], plat.pos[1] + plat.size[1]);
 
     // find closest point on capsule central vertical segment to the closest point of the platform
     // that we found above
     const closest_cap_point_y = math.clamp(closest_plat_point_y, captop, capbot);
-    const closest_cap_point_x = cappos;
+    const closest_cap_point_x = pos[0];
 
     // find their distance^2:
     const dx = closest_cap_point_x - closest_plat_point_x;
@@ -137,45 +153,87 @@ pub fn checkPlayerCollision(pos: Vec2f, capr: f32, vel: Vec2f, plat: Platform, p
     }
     return retvel;
 }
-// pub fn isPlayerColliding(g: *Game,  newpos: Vec2i) bool {
-//     const capleft = newpos[0] - g.player.r;
-//     const capright = newpos[0] + g.player.r;
-//     const captop = newpos[1] - 2 * g.player.r;
-//     const capbot = newpos[1] + 2 * g.player.r;
-//     const imin = @divTrunc(capleft, Game.TileSize);
-//     const jmin = @divTrunc(captop, Game.TileSize);
-//     const imax = @divTrunc(capright, Game.TileSize);
-//     const jmax = @divTrunc(capbot, Game.TileSize);
-//     var i = imin;
-//     while (i <= imax) : (i += 1) {
-//         var j = jmin;
-//         while (j <= jmax) : (j += 1) {
-//             if (g.tileset.get(Vec2i{ i, j })) |tile| {
-//                 if (tile == .block) return true;
-//             }
-//         }
-//     }
-//     return false;
-// }
+
+pub const WorldMap = struct {
+    pub const GridSize: f32 = 128;
+    pub const GridCellNumberX: f32 = 10;
+    pub const GridCellNumberY: f32 = 6;
+    pub const GridSizeVec2f = Vec2f{ GridSize, GridSize };
+    grid: [GridCellNumberX][GridCellNumberY]GridCell,
+    platforms: std.ArrayList(Platform),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) !*WorldMap {
+        const map = try allocator.create(WorldMap);
+        map.* = .{
+            .allocator = allocator,
+            .grid = undefined,
+            .platforms = try std.ArrayList(Platform).initCapacity(allocator, 10),
+        };
+        try map.setup();
+        return map;
+    }
+
+    pub fn setup(map: *WorldMap) !void {
+        for (0..GridCellNumberX) |x| {
+            for (0..GridCellNumberY) |y| {
+                map.grid[x][y] = .{ .pids = try std.ArrayList(usize).initCapacity(map.allocator, 10) };
+            }
+        }
+
+        try map.platforms.append(map.allocator, Platform{
+            .pos = .{ 100, 50 },
+            .size = .{ 100, 200 },
+        });
+
+        try map.platforms.append(map.allocator, Platform{
+            .pos = .{ 200, 200 },
+            .size = .{ 300, 150 },
+        });
+
+        try map.platforms.append(map.allocator, Platform{
+            .pos = .{ 0, GridSize * GridCellNumberY - 11 },
+            .size = .{ GridSize * GridCellNumberX - 1, 10 },
+        });
+
+        for (map.platforms.items, 0..) |platform, pid| {
+            const imin: usize = @intFromFloat(platform.pos[0] / iToF32(WorldMap.GridSize));
+            const jmin: usize = @intFromFloat(platform.pos[1] / iToF32(WorldMap.GridSize));
+            const imax: usize = @intFromFloat((platform.pos[0] + platform.size[0]) / iToF32(WorldMap.GridSize));
+            const jmax: usize = @intFromFloat((platform.pos[1] + platform.size[1]) / iToF32(WorldMap.GridSize));
+            var i = imin;
+            while (i <= imax) : (i += 1) {
+                var j = jmin;
+                while (j <= jmax) : (j += 1) {
+                    try map.grid[i][j].pids.append(map.allocator, pid);
+                }
+            }
+        }
+    }
+
+    pub fn deinit(map: *WorldMap) void {
+        for (0..GridCellNumberX) |x| {
+            for (0..GridCellNumberY) |y| {
+                map.grid[x][y].pids.deinit(map.allocator);
+            }
+        }
+        map.allocator.destroy(map);
+    }
+};
 
 pub const Game = struct {
-    pub const TileSize: f32 = 32;
-    pub const TileNumberX: f32 = 32;
-    pub const TileNumberY: f32 = 20;
-    pub const TileSizeVec2f = Vec2f{ TileSize, TileSize };
-
+    collision_frame_id: i64 = 1,
     pause: bool = false,
     fps: i32 = 60,
-    gravity: f32 = 400,
-    friction: f32 = 5,
+    gravity: f32 = 500,
+    friction: f32 = 10,
     dt: f32 = undefined,
     dt2: f32 = undefined,
     allocator: std.mem.Allocator,
     player: Player = undefined,
-    screenWidth: i32 = fToI32(TileNumberX * TileSize),
-    screenHeight: i32 = fToI32(TileNumberY * TileSize),
-    platforms: std.ArrayList(Platform),
-    tileset: std.AutoHashMap(Vec2i, TileType),
+    wmap: *WorldMap = undefined,
+    screenWidth: i32 = fToI32(WorldMap.GridSize * WorldMap.GridCellNumberX),
+    screenHeight: i32 = fToI32(WorldMap.GridSize * WorldMap.GridCellNumberY),
     inputs: struct {
         right: bool,
         left: bool,
@@ -200,8 +258,6 @@ pub const Game = struct {
         const game = try allocator.create(Game);
         game.* = .{
             .allocator = allocator,
-            .platforms = try std.ArrayList(Platform).initCapacity(allocator, 10),
-            .tileset = std.AutoHashMap(Vec2i, TileType).init(allocator),
         };
         try game.setup();
         return game;
@@ -223,56 +279,40 @@ pub const Game = struct {
     }
 
     fn setup(g: *Game) !void {
+        g.wmap = try WorldMap.init(g.allocator);
         g.dt = 1.0 / iToF32(g.fps);
         g.dt2 = g.dt * g.dt;
         g.player = Player{
             .pos = .{ iToF32(@divTrunc(g.screenWidth, 2)), iToF32(@divTrunc(g.screenHeight, 2)) },
         };
-
-        try g.platforms.append(g.allocator, Platform{
-            .pos = .{ 3, 5 },
-            .size = .{ 5, 7 },
-        });
-
-        try g.platforms.append(g.allocator, Platform{
-            .pos = .{ 0, 19 },
-            .size = .{ 32, 1 },
-        });
-        for (g.platforms.items) |platform| {
-            var i: usize = @intFromFloat(platform.pos[0]);
-            var j: usize = undefined;
-            const imax: usize = @intFromFloat(platform.pos[0] + platform.size[0]);
-            const jmax: usize = @intFromFloat(platform.pos[1] + platform.size[1]);
-            while (i < imax) : (i += 1) {
-                j = @intFromFloat(platform.pos[1]);
-                while (j < jmax) : (j += 1) {
-                    try g.tileset.put(.{ @intCast(i), @intCast(j) }, .block);
-                }
-            }
-        }
     }
 
     fn draw(g: *Game) void {
-        for (g.platforms.items) |platform| {
-            rl.drawRectangleV(toRLVec(platform.pos * Vec2f{ TileSize, TileSize }), toRLVec(platform.size * Vec2f{ TileSize, TileSize }), platform.color);
-        }
-        g.drawTileLines();
-    }
-
-    fn drawTileLines(g: *Game) void {
-        var iter = g.tileset.iterator();
-        while (iter.next()) |entry| {
-            const pos = iToVec2f(entry.key_ptr.*) * TileSizeVec2f;
-            rl.drawRectangleLines(fToI32(pos[0]), fToI32(pos[1]), fToI32(TileSize), fToI32(TileSize), .yellow);
+        if (g.pause) g.drawGridLines();
+        for (g.wmap.platforms.items) |platform| {
+            rl.drawRectangleV(toRLVec(platform.pos), toRLVec(platform.size), platform.color);
         }
         g.player.draw();
     }
 
+    fn drawGridLines(g: *Game) void {
+        var i: i32 = 0;
+        while (i < WorldMap.GridCellNumberY) : (i += 1) {
+            rl.drawLineV(rl.Vector2{ .x = 0, .y = iToF32(i) * WorldMap.GridSize }, rl.Vector2{ .x = iToF32(g.screenWidth), .y = iToF32(i) * WorldMap.GridSize }, .yellow);
+        }
+        i = 0;
+        while (i < WorldMap.GridCellNumberX) : (i += 1) {
+            rl.drawLineV(rl.Vector2{ .x = iToF32(i) * WorldMap.GridSize, .y = 0 }, rl.Vector2{ .x = iToF32(i) * WorldMap.GridSize, .y = iToF32(g.screenHeight) }, .yellow);
+        }
+    }
+
     pub fn process(g: *Game) void {
         if (g.inputs.left) {
-            g.player.vel[0] = -g.player.maxvel[0];
+            g.player.vel[0] = -g.player.speedX;
+            if (g.player.vel[0] < -g.player.maxvel[0]) g.player.vel[0] = -g.player.maxvel[0];
         } else if (g.inputs.right) {
-            g.player.vel[0] = g.player.maxvel[0];
+            g.player.vel[0] = g.player.speedX;
+            if (g.player.vel[0] > g.player.maxvel[0]) g.player.vel[0] = g.player.maxvel[0];
         } else {
             if (g.player.vel[0] > 0) g.player.vel[0] -= g.friction;
             if (g.player.vel[0] < 0) g.player.vel[0] += g.friction;
@@ -292,6 +332,7 @@ pub const Game = struct {
         rl.setExitKey(rl.KeyboardKey.null);
         rl.setTargetFPS(g.fps); // Set our game to run at 60 frames-per-second
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
+            g.collision_frame_id += 1;
             g.updateInputs();
             if (!g.pause) {
                 g.process();
@@ -304,8 +345,7 @@ pub const Game = struct {
         }
     }
     pub fn deinit(g: *Game) void {
-        g.tileset.deinit();
-        g.platforms.deinit(g.allocator);
+        g.wmap.deinit();
         g.allocator.destroy(g);
     }
 };
