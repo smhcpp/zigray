@@ -51,7 +51,7 @@ const Player = struct {
 /// later on we can add more complex shapes like circles or polygons
 /// if needed
 pub const Platform = struct {
-    collision_frame_id: i64 = 0,
+    collision_step_id: u64 = 0,
     // vision_frame_id:f64,
     pos: Vec2f,
     size: Vec2f,
@@ -69,12 +69,13 @@ pub fn movePlayer(g: *Game) void {
     const number_of_steps = @max(@floor(@abs(temp[0])), @floor(@abs(temp[1]))) + 1;
     var bucket = Vec2f{ 0, 0 };
     var poschange = Vec2f{ 0, 0 };
-    const velocity_step = total_delta / Vec2f{ number_of_steps, number_of_steps };
+    var velocity_step = total_delta / Vec2f{ number_of_steps, number_of_steps };
     var i: f32 = 0;
     var retvel = Vec2f{ 0, 0 };
     var xcollision = false;
     var ycollision = false;
     while ((!xcollision or !ycollision) and i < number_of_steps) : (i += 1) {
+        g.collision_step_id += 1;
         bucket += velocity_step;
         const pos = g.player.pos + bucket;
         const minpos = pos - Vec2f{ g.player.r, 2 * g.player.r };
@@ -85,29 +86,27 @@ pub fn movePlayer(g: *Game) void {
         var k = minind[1];
         while (j <= maxind[0]) : (j += 1) {
             while (k <= maxind[1]) : (k += 1) {
+                if (j < 0 or k < 0 or j >= WorldMap.GridCellNumberX or k >= WorldMap.GridCellNumberY) continue;
                 for (g.wmap.grid[@intCast(j)][@intCast(k)].pids.items) |pid| {
-                    // movement fix, platforms get processed multiple times if they exist in multiple grid cells
-                    // if (g.collision_frame_id == g.wmap.platforms.items[pid].collision_frame_id) continue;
+                    if (g.collision_step_id == g.wmap.platforms.items[pid].collision_step_id) continue;
                     retvel = checkPlayerCollision(pos, g.player.r, g.player.vel, g.wmap.platforms.items[pid], &poschange);
                     if (g.player.vel[0] != retvel[0]) {
+                        velocity_step[0] = 0;
                         xcollision = true;
                     }
                     if (g.player.vel[1] != retvel[1]) {
                         ycollision = true;
+                        velocity_step[1] = 0;
                     }
-                    // g.wmap.platforms.items[pid].collision_frame_id = g.collision_frame_id;
+                    g.wmap.platforms.items[pid].collision_step_id = g.collision_step_id;
                 }
             }
         }
     }
-    if (ycollision) {
-        retvel[1] = 0;
-    }
-    if (xcollision) {
-        retvel[0] = 0;
-    }
+    if (ycollision) retvel[1] = 0;
+    if (xcollision) retvel[0] = 0;
     g.player.pos += bucket + poschange;
-    g.player.vel = retvel;
+    if(xcollision or ycollision) g.player.vel = retvel;
 }
 
 pub fn checkPlayerCollision(pos: Vec2f, capr: f32, vel: Vec2f, plat: Platform, poschange: *Vec2f) Vec2f {
@@ -161,37 +160,35 @@ pub const WorldMap = struct {
     pub const GridSizeVec2f = Vec2f{ GridSize, GridSize };
     grid: [GridCellNumberX][GridCellNumberY]GridCell,
     platforms: std.ArrayList(Platform),
-    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !*WorldMap {
         const map = try allocator.create(WorldMap);
         map.* = .{
-            .allocator = allocator,
             .grid = undefined,
             .platforms = try std.ArrayList(Platform).initCapacity(allocator, 10),
         };
-        try map.setup();
+        try map.setup(allocator);
         return map;
     }
 
-    pub fn setup(map: *WorldMap) !void {
+    pub fn setup(map: *WorldMap, allocator: std.mem.Allocator) !void {
         for (0..GridCellNumberX) |x| {
             for (0..GridCellNumberY) |y| {
-                map.grid[x][y] = .{ .pids = try std.ArrayList(usize).initCapacity(map.allocator, 10) };
+                map.grid[x][y] = .{ .pids = try std.ArrayList(usize).initCapacity(allocator, 10) };
             }
         }
 
-        try map.platforms.append(map.allocator, Platform{
+        try map.platforms.append(allocator, Platform{
             .pos = .{ 100, 50 },
             .size = .{ 100, 200 },
         });
 
-        try map.platforms.append(map.allocator, Platform{
+        try map.platforms.append(allocator, Platform{
             .pos = .{ 200, 200 },
             .size = .{ 300, 150 },
         });
 
-        try map.platforms.append(map.allocator, Platform{
+        try map.platforms.append(allocator, Platform{
             .pos = .{ 0, GridSize * GridCellNumberY - 11 },
             .size = .{ GridSize * GridCellNumberX - 1, 10 },
         });
@@ -205,24 +202,25 @@ pub const WorldMap = struct {
             while (i <= imax) : (i += 1) {
                 var j = jmin;
                 while (j <= jmax) : (j += 1) {
-                    try map.grid[i][j].pids.append(map.allocator, pid);
+                    try map.grid[i][j].pids.append(allocator, pid);
                 }
             }
         }
     }
 
-    pub fn deinit(map: *WorldMap) void {
+    pub fn deinit(map: *WorldMap, allocator: std.mem.Allocator) void {
         for (0..GridCellNumberX) |x| {
             for (0..GridCellNumberY) |y| {
-                map.grid[x][y].pids.deinit(map.allocator);
+                map.grid[x][y].pids.deinit(allocator);
             }
         }
-        map.allocator.destroy(map);
+        map.platforms.deinit(allocator);
+        allocator.destroy(map);
     }
 };
 
 pub const Game = struct {
-    collision_frame_id: i64 = 1,
+    collision_step_id: u64 = 0,
     pause: bool = false,
     fps: i32 = 60,
     gravity: f32 = 500,
@@ -332,7 +330,7 @@ pub const Game = struct {
         rl.setExitKey(rl.KeyboardKey.null);
         rl.setTargetFPS(g.fps); // Set our game to run at 60 frames-per-second
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
-            g.collision_frame_id += 1;
+            // g.collision_frame_id += 1;
             g.updateInputs();
             if (!g.pause) {
                 g.process();
@@ -345,7 +343,7 @@ pub const Game = struct {
         }
     }
     pub fn deinit(g: *Game) void {
-        g.wmap.deinit();
+        g.wmap.deinit(g.allocator);
         g.allocator.destroy(g);
     }
 };
