@@ -12,7 +12,6 @@ pub const Game = struct {
     gravity: f32 = 500,
     friction: f32 = 10,
     dt: f32 = undefined,
-    dt2: f32 = undefined,
     allocator: std.mem.Allocator,
     player: T.Player = undefined,
     wmap: *T.WorldMap = undefined,
@@ -44,7 +43,21 @@ pub const Game = struct {
             .allocator = allocator,
         };
         try game.setup();
+        game.dt = 1.0 / T.iToF32(game.fps);
         return game;
+    }
+
+    fn _testInput(g: *Game) void {
+        const delta: f32 = 3;
+        if (g.inputs.right) {
+            g.player.pos[0] += delta;
+        } else if (g.inputs.left) {
+            g.player.pos[0] -= delta;
+        } else if (g.inputs.up) {
+            g.player.pos[1] -= delta;
+        } else if (g.inputs.down) {
+            g.player.pos[1] += delta;
+        }
     }
 
     fn updateInputs(g: *Game) void {
@@ -66,7 +79,6 @@ pub const Game = struct {
         g.wmap = try T.WorldMap.init(g.allocator);
         g.vision = try Vision.init(g);
         g.dt = 1.0 / T.iToF32(g.fps);
-        g.dt2 = g.dt * g.dt;
         g.player = T.Player{
             .pos = .{ T.iToF32(@divTrunc(g.screenWidth, 2)), T.iToF32(@divTrunc(g.screenHeight, 2)) },
         };
@@ -74,8 +86,13 @@ pub const Game = struct {
 
     fn draw(g: *Game) void {
         if (g.pause) g.drawGridLines();
-        for (g.wmap.platforms.items) |platform| {
-            rl.drawRectangleV(T.toRLVec(platform.pos), T.toRLVec(platform.size), platform.color);
+        for (g.wmap.platforms.items) |p| {
+            const left = @max(p.pos[0], g.player.pos[0] - g.player.vision_r, 0);
+            const right = @min(p.pos[0] + p.size[0], g.player.pos[0] + g.player.vision_r, T.iToF32(g.screenWidth));
+            const top = @max(p.pos[1], g.player.pos[1] - g.player.vision_r, 0);
+            const bottom = @min(p.pos[1] + p.size[1], g.player.pos[1] + g.player.vision_r, T.iToF32(g.screenHeight));
+            if (left < right and top < bottom)
+                rl.drawRectangleV(.{ .x = left, .y = top }, .{ .x = right - left, .y = bottom - top }, p.color);
         }
         g.player.draw();
     }
@@ -119,8 +136,9 @@ pub const Game = struct {
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
             // g.collision_frame_id += 1;
             g.updateInputs();
+            g._testInput();
             if (!g.pause) {
-                g.process();
+                // g.process();
                 try g.vision.updatePlayerVision();
             }
 
