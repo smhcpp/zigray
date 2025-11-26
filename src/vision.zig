@@ -24,7 +24,6 @@ pub const Vision = struct {
 
     pub fn updatePlayerVision(v: *Vision) !void {
         v.vision_step_id += 1;
-        // print("vision step id: {}\n", .{v.vision_step_id});
         const g = v.g;
         var corners = try std.ArrayList(Corner).initCapacity(g.allocator, g.wmap.platforms.items.len);
         defer corners.deinit(g.allocator);
@@ -36,30 +35,43 @@ pub const Vision = struct {
         const right = @min(g.player.pos[0] + g.player.vision_r, T.iToF32(g.screenWidth));
         const top = @max(g.player.pos[1] - g.player.vision_r, 0);
         const bottom = @min(g.player.pos[1] + g.player.vision_r, T.iToF32(g.screenHeight));
-        try corners.append(g.allocator, Corner{ .pos = T.Vec2f{ left, top }, .pid = null, .angle = std.math.atan2(top - g.player.pos[1], left - g.player.pos[0]), .dist2 = T.dist2(T.Vec2f{ left, top }, g.player.pos) });
-        try corners.append(g.allocator, Corner{ .pos = T.Vec2f{ right, top }, .pid = null, .angle = std.math.atan2(top - g.player.pos[1], right - g.player.pos[0]), .dist2 = T.dist2(T.Vec2f{ right, top }, g.player.pos) });
-        try corners.append(g.allocator, Corner{ .pos = T.Vec2f{ right, bottom }, .pid = null, .angle = std.math.atan2(bottom - g.player.pos[1], right - g.player.pos[0]), .dist2 = T.dist2(T.Vec2f{ right, bottom }, g.player.pos) });
-        try corners.append(g.allocator, Corner{ .pos = T.Vec2f{ left, bottom }, .pid = null, .angle = std.math.atan2(bottom - g.player.pos[1], left - g.player.pos[0]), .dist2 = T.dist2(T.Vec2f{ left, bottom }, g.player.pos) });
+        try corners.append(g.allocator, Corner{
+            .pos = T.Vec2f{ left, top },
+            .pid = null,
+            .angle = std.math.atan2(top - g.player.pos[1], left - g.player.pos[0]),
+            .dist2 = T.dist2(T.Vec2f{ left, top }, g.player.pos),
+        });
+        try corners.append(g.allocator, Corner{
+            .pos = T.Vec2f{ right, top },
+            .pid = null,
+            .angle = std.math.atan2(top - g.player.pos[1], right - g.player.pos[0]),
+            .dist2 = T.dist2(T.Vec2f{ right, top }, g.player.pos),
+        });
+        try corners.append(g.allocator, Corner{
+            .pos = T.Vec2f{ right, bottom },
+            .pid = null,
+            .angle = std.math.atan2(bottom - g.player.pos[1], right - g.player.pos[0]),
+            .dist2 = T.dist2(T.Vec2f{ right, bottom }, g.player.pos),
+        });
+        try corners.append(g.allocator, Corner{
+            .pos = T.Vec2f{ left, bottom },
+            .pid = null,
+            .angle = std.math.atan2(bottom - g.player.pos[1], left - g.player.pos[0]),
+            .dist2 = T.dist2(T.Vec2f{ left, bottom }, g.player.pos),
+        });
         var j = minind[0];
         while (j <= maxind[0]) : (j += 1) {
             var k = minind[1];
             while (k <= maxind[1]) : (k += 1) {
-                // print("here is update vision function {},{}\n", .{j,k});
                 if (j < 0 or k < 0 or j >= T.WorldMap.GridCellNumberX or k >= T.WorldMap.GridCellNumberY) continue;
-                // print("here is get corners function for platform {}\n", .{pid});
                 for (g.wmap.grid[@intCast(j)][@intCast(k)].pids.items) |pid| {
-                    // print("here is update vision function for platform {}\n", .{pid});
                     if (v.vision_step_id == g.wmap.platforms.items[pid].vision_step_id) continue;
-                    // print("here is update vision function(after vision step id check) for platform {}\n", .{pid});
                     const c = try v.getCorners(pid);
                     defer g.allocator.free(c);
                     try corners.appendSlice(g.allocator, c);
                     g.wmap.platforms.items[pid].vision_step_id = v.vision_step_id;
                 }
             }
-        }
-        for (corners.items) |corner| {
-            rl.drawLineV(T.toRLVec(v.g.player.pos), T.toRLVec(corner.pos), .orange);
         }
         try v.updateHits(&corners, minind, maxind);
     }
@@ -84,15 +96,25 @@ pub const Vision = struct {
         // we do not have to have all corners because there will be
         // at least one and at most two corners that are not
         // visible even when we have not considered other platforms
-        // print("here is get corners function for platform {}\n", .{pid});
         if (left < right and top < bottom) {
-            // print("here is get corners function inside if statement for platform {}\n", .{pid});
-            try corners.append(g.allocator, Corner{ .pos = tl, .pid = pid, .angle = atl, .dist2 = T.dist2(tl, g.player.pos) });
-            try corners.append(g.allocator, Corner{ .pos = tr, .pid = pid, .angle = atr, .dist2 = T.dist2(tr, g.player.pos) });
-            try corners.append(g.allocator, Corner{ .pos = bl, .pid = pid, .angle = abl, .dist2 = T.dist2(bl, g.player.pos) });
-            try corners.append(g.allocator, Corner{ .pos = br, .pid = pid, .angle = abr, .dist2 = T.dist2(br, g.player.pos) });
+            const corners_ = [_]Corner{
+                Corner{ .pos = tl, .pid = pid, .angle = atl, .dist2 = T.dist2(tl, g.player.pos) },
+                Corner{ .pos = tr, .pid = pid, .angle = atr, .dist2 = T.dist2(tr, g.player.pos) },
+                Corner{ .pos = bl, .pid = pid, .angle = abl, .dist2 = T.dist2(bl, g.player.pos) },
+                Corner{ .pos = br, .pid = pid, .angle = abr, .dist2 = T.dist2(br, g.player.pos) },
+            };
+            for (corners_) |corner| {
+                const offset: f32 = 0.1;
+                const maxdist: f32 = v.g.player.vision_r * v.g.player.vision_r * 2.001;
+                const angle1 = corner.angle + offset;
+                const angle2 = corner.angle - offset;
+                const corner1 = Corner{ .pos = .{ std.math.sin(angle1) * maxdist, std.math.cos(angle1) * maxdist }, .pid = null, .angle = angle1, .dist2 = maxdist };
+                const corner2 = Corner{ .pos = .{ std.math.sin(angle2) * maxdist, std.math.cos(angle2) * maxdist }, .pid = null, .angle = angle2, .dist2 = maxdist };
+                try corners.append(g.allocator, corner);
+                try corners.append(g.allocator, corner1);
+                try corners.append(g.allocator, corner2);
+            }
         }
-        // print("----------------------------------------\n", .{});
         return corners.toOwnedSlice(g.allocator);
     }
 
@@ -100,19 +122,25 @@ pub const Vision = struct {
         if (v.vision_step_id > 10000) v.vision_step_id = 0;
         v.hits.clearRetainingCapacity();
         const g = v.g;
-        var i = minind[0];
+        // print("here is update hits-----------------------------\n", .{});
         for (corners.items) |corner| {
             var closest = Corner{ .pos = corner.pos, .pid = corner.pid, .angle = corner.angle, .dist2 = corner.dist2 };
+            // print("corner: {any}\n",.{corner});
             v.vision_step_id += 1;
+            var i = minind[0];
             while (i <= maxind[0]) : (i += 1) {
                 var j = minind[1];
                 while (j <= maxind[1]) : (j += 1) {
+                    if (i < 0 or j < 0 or i >= T.WorldMap.GridCellNumberX or j >= T.WorldMap.GridCellNumberY) continue;
                     for (g.wmap.grid[@intCast(i)][@intCast(j)].pids.items) |pid| {
                         if (g.wmap.platforms.items[pid].vision_step_id == v.vision_step_id) continue;
                         g.wmap.platforms.items[pid].vision_step_id = v.vision_step_id;
                         const collision = try v.getCollision(pid, &corner);
+                        // print("platform id (pid) for collision check: {}\n", .{pid});
+                        // print("corner before collision check: {any}\n", .{corner});
                         if (collision) |col| {
                             const d = T.dist2(col, v.g.player.pos);
+                            // print("collision: {any}, distance: {}\n", .{col,d});
                             if (closest.dist2 > d) {
                                 closest.pos = col;
                                 closest.pid = pid;
@@ -162,7 +190,8 @@ pub const Vision = struct {
         const bottom = @min(g.player.pos[1] + g.player.vision_r, T.iToF32(g.screenHeight));
         rl.drawRectangleLines(T.fToI32(left), T.fToI32(top), T.fToI32(right - left), T.fToI32(bottom - top), .red);
         for (v.hits.items) |hit| {
-            rl.drawCircle(T.fToI32(hit.pos[0]), T.fToI32(hit.pos[1]), 3, .red);
+            rl.drawCircle(T.fToI32(hit.pos[0]), T.fToI32(hit.pos[1]), 3, .yellow);
+            rl.drawLineV(T.toRLVec(v.g.player.pos), T.toRLVec(hit.pos), .yellow);
         }
     }
 };
@@ -206,9 +235,9 @@ pub fn getColSegPSeg(seg: Segment, pseg: Segment) ?T.Vec2f {
             return T.Vec2f{ wall_x, intersect_y };
         }
     }
-
     return null;
 }
+
 pub const Segment = struct {
     start: T.Vec2f,
     end: T.Vec2f,
