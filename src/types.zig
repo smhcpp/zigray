@@ -213,6 +213,16 @@ pub const WorldMap = struct {
         });
 
         try map.platforms.append(allocator, Platform{
+            .pos = .{ 700, 250 },
+            .size = .{ 200, 150 },
+        });
+
+        try map.platforms.append(allocator, Platform{
+            .pos = .{ 500, 450 },
+            .size = .{ 200, 100 },
+        });
+
+        try map.platforms.append(allocator, Platform{
             .pos = .{ 0, GridSize * GridCellNumberY - 11 },
             .size = .{ GridSize * GridCellNumberX - 1, 10 },
         });

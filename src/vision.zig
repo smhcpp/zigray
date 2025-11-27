@@ -67,29 +67,24 @@ pub const Vision = struct {
         try corners.appendSlice(g.allocator, pvis);
         try v.updateHits(&corners, minind, maxind);
     }
+
     fn getCorners(v: *Vision, pid: usize) ![]const Corner {
         const g = v.g;
         var corners = try std.ArrayList(Corner).initCapacity(g.allocator, 12); // Increased capacity for safety
         defer corners.deinit(g.allocator);
         const p = &g.wmap.platforms.items[pid];
-
-        // 1. Calculate boundaries
         const left = @max(p.pos[0], g.player.pos[0] - g.player.vision_r, 0);
         const right = @min(p.pos[0] + p.size[0], g.player.pos[0] + g.player.vision_r, T.iToF32(g.screenWidth));
         const top = @max(p.pos[1], g.player.pos[1] - g.player.vision_r, 0);
         const bottom = @min(p.pos[1] + p.size[1], g.player.pos[1] + g.player.vision_r, T.iToF32(g.screenHeight));
-
         const tl = T.Vec2f{ left, top };
         const tr = T.Vec2f{ right, top };
         const bl = T.Vec2f{ left, bottom };
         const br = T.Vec2f{ right, bottom };
-
-        // 2. FIX: Remove '+ std.math.pi'. We want the angle TO the corner, not away from it.
         const atl = std.math.atan2(tl[1] - g.player.pos[1], tl[0] - g.player.pos[0]);
         const atr = std.math.atan2(tr[1] - g.player.pos[1], tr[0] - g.player.pos[0]);
         const abl = std.math.atan2(bl[1] - g.player.pos[1], bl[0] - g.player.pos[0]);
         const abr = std.math.atan2(br[1] - g.player.pos[1], br[0] - g.player.pos[0]);
-
         if (left < right and top < bottom) {
             const corners_ = [_]Corner{
                 Corner{ .pos = tl, .pid = pid, .angle = atl, .dist2 = T.dist2(tl, g.player.pos) },
@@ -97,65 +92,16 @@ pub const Vision = struct {
                 Corner{ .pos = bl, .pid = pid, .angle = abl, .dist2 = T.dist2(bl, g.player.pos) },
                 Corner{ .pos = br, .pid = pid, .angle = abr, .dist2 = T.dist2(br, g.player.pos) },
             };
-
             const max_cast_dist = v.g.player.vision_r * 2.0; // Cast further than vision radius
             const max_dist2 = max_cast_dist * max_cast_dist;
-
             for (corners_) |corner| {
                 const offset: f32 = 0.0001;
                 const angle1 = corner.angle + offset;
                 const angle2 = corner.angle - offset;
-
-                // 3. FIX: Use cos for X, sin for Y.
-                // 4. FIX: Add g.player.pos so the point is relative to the player, not (0,0).
                 const pos1 = T.Vec2f{ g.player.pos[0] + std.math.cos(angle1) * max_cast_dist, g.player.pos[1] + std.math.sin(angle1) * max_cast_dist };
-
                 const pos2 = T.Vec2f{ g.player.pos[0] + std.math.cos(angle2) * max_cast_dist, g.player.pos[1] + std.math.sin(angle2) * max_cast_dist };
-
                 const corner1 = Corner{ .pos = pos1, .pid = 0, .angle = angle1, .dist2 = max_dist2 };
                 const corner2 = Corner{ .pos = pos2, .pid = 0, .angle = angle2, .dist2 = max_dist2 };
-
-                try corners.append(g.allocator, corner);
-                try corners.append(g.allocator, corner1);
-                try corners.append(g.allocator, corner2);
-            }
-        }
-        return corners.toOwnedSlice(g.allocator);
-    }
-    fn getCornerss(v: *Vision, pid: usize) ![]const Corner {
-        const g = v.g;
-        var corners = try std.ArrayList(Corner).initCapacity(g.allocator, 4);
-        defer corners.deinit(g.allocator);
-        const p = &g.wmap.platforms.items[pid];
-        const left = @max(p.pos[0], g.player.pos[0] - g.player.vision_r, 0);
-        const right = @min(p.pos[0] + p.size[0], g.player.pos[0] + g.player.vision_r, T.iToF32(g.screenWidth));
-        const top = @max(p.pos[1], g.player.pos[1] - g.player.vision_r, 0);
-        const bottom = @min(p.pos[1] + p.size[1], g.player.pos[1] + g.player.vision_r, T.iToF32(g.screenHeight));
-        const tl = T.Vec2f{ left, top };
-        const tr = T.Vec2f{ right, top };
-        const bl = T.Vec2f{ left, bottom };
-        const br = T.Vec2f{ right, bottom };
-        const atl = std.math.atan2(tl[1] - g.player.pos[1], tl[0] - g.player.pos[0]) + std.math.pi;
-        const atr = std.math.atan2(tr[1] - g.player.pos[1], tr[0] - g.player.pos[0]) + std.math.pi;
-        const abl = std.math.atan2(bl[1] - g.player.pos[1], bl[0] - g.player.pos[0]) + std.math.pi;
-        const abr = std.math.atan2(br[1] - g.player.pos[1], br[0] - g.player.pos[0]) + std.math.pi;
-        // we do not have to have all corners because there will be
-        // at least one and at most two corners that are not
-        // visible even when we have not considered other platforms
-        if (left < right and top < bottom) {
-            const corners_ = [_]Corner{
-                Corner{ .pos = tl, .pid = pid, .angle = atl, .dist2 = T.dist2(tl, g.player.pos) },
-                Corner{ .pos = tr, .pid = pid, .angle = atr, .dist2 = T.dist2(tr, g.player.pos) },
-                Corner{ .pos = bl, .pid = pid, .angle = abl, .dist2 = T.dist2(bl, g.player.pos) },
-                Corner{ .pos = br, .pid = pid, .angle = abr, .dist2 = T.dist2(br, g.player.pos) },
-            };
-            for (corners_) |corner| {
-                const offset: f32 = 0.0001;
-                const maxdist: f32 = v.g.player.vision_r * v.g.player.vision_r * 2.001;
-                const angle1 = corner.angle + offset;
-                const angle2 = corner.angle - offset;
-                const corner1 = Corner{ .pos = .{ std.math.sin(angle1) * maxdist, std.math.cos(angle1) * maxdist }, .pid = 0, .angle = angle1, .dist2 = maxdist };
-                const corner2 = Corner{ .pos = .{ std.math.sin(angle2) * maxdist, std.math.cos(angle2) * maxdist }, .pid = 0, .angle = angle2, .dist2 = maxdist };
                 try corners.append(g.allocator, corner);
                 try corners.append(g.allocator, corner1);
                 try corners.append(g.allocator, corner2);
@@ -229,19 +175,19 @@ pub const Vision = struct {
     }
 
     pub fn drawPlayerVision(v: *Vision) void {
-        const g = v.g;
-        const left = @max(g.player.pos[0] - g.player.vision_r, 0);
-        const right = @min(g.player.pos[0] + g.player.vision_r, T.iToF32(g.screenWidth));
-        const top = @max(g.player.pos[1] - g.player.vision_r, 0);
-        const bottom = @min(g.player.pos[1] + g.player.vision_r, T.iToF32(g.screenHeight));
-        rl.drawRectangleLines(T.fToI32(left), T.fToI32(top), T.fToI32(right - left), T.fToI32(bottom - top), .red);
-        for (v.hits.items) |hit| {
-            rl.drawCircle(T.fToI32(hit.pos[0]), T.fToI32(hit.pos[1]), 3, .yellow);
-            rl.drawLineV(T.toRLVec(v.g.player.pos), T.toRLVec(hit.pos), .yellow);
+        std.mem.sort(Corner, v.hits.items, {}, comptime lessThan);
+        var i:usize=0;
+        while (i<v.hits.items.len-1):(i+=1){
+            rl.drawTriangle(T.toRLVec(v.g.player.pos), T.toRLVec(v.hits.items[i+1].pos), T.toRLVec(v.hits.items[i].pos),.yellow);
         }
+        rl.drawTriangle(T.toRLVec(v.g.player.pos), T.toRLVec(v.hits.items[0].pos), T.toRLVec(v.hits.items[v.hits.items.len-1].pos),.yellow);
     }
 };
 
+fn lessThan(context: void, a: Corner, b: Corner) bool {
+    _ = context;
+    return a.angle < b.angle;
+}
 // Returns intersection point if 'seg' intersects 'pseg'.
 // Assumes 'pseg' is strictly vertical or horizontal.
 pub fn getColSegPSeg(seg: Segment, pseg: Segment) ?T.Vec2f {

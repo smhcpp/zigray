@@ -95,6 +95,7 @@ pub const Game = struct {
             if (left < right and top < bottom)
                 rl.drawRectangleV(.{ .x = left, .y = top }, .{ .x = right - left, .y = bottom - top }, p.color);
         }
+        g.vision.drawPlayerVision();
         g.player.draw();
     }
 
@@ -147,7 +148,6 @@ pub const Game = struct {
             defer rl.endDrawing();
             rl.clearBackground(.black);
             g.draw();
-            g.vision.drawPlayerVision();
         }
     }
     pub fn deinit(g: *Game) void {
