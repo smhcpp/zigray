@@ -87,6 +87,7 @@ pub const Game = struct {
     fn draw(g: *Game) void {
         if (g.pause) g.drawGridLines();
         for (g.wmap.platforms.items) |p| {
+            if (!p.drawable) continue;
             const left = @max(p.pos[0], g.player.pos[0] - g.player.vision_r, 0);
             const right = @min(p.pos[0] + p.size[0], g.player.pos[0] + g.player.vision_r, T.iToF32(g.screenWidth));
             const top = @max(p.pos[1], g.player.pos[1] - g.player.vision_r, 0);
@@ -129,7 +130,7 @@ pub const Game = struct {
     }
 
     pub fn run(g: *Game) !void {
-        rl.initWindow(g.screenWidth, g.screenHeight, "raylib-zig [core] example - basic window");
+        rl.initWindow(g.screenWidth, g.screenHeight, "Platformer 2d");
         defer rl.closeWindow(); // Close window and OpenGL context
         rl.setExitKey(rl.KeyboardKey.null);
         rl.setTargetFPS(g.fps); // Set our game to run at 60 frames-per-second

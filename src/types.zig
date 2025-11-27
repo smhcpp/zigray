@@ -36,6 +36,9 @@ pub fn fToI32(v: f32) i32 {
 pub const Player = struct {
     pos: Vec2f,
     r: f32 = 10,
+    collision_mask: u32 = 1,
+    vision_mask: u32 = 1,
+    // drawable: bool = true,
     color: rl.Color = .blue,
     vel: Vec2f = Vec2f{ 0, 0 },
     maxvel: Vec2f = Vec2f{ 400, 600 },
@@ -55,12 +58,18 @@ pub const Player = struct {
     }
 };
 
+// pub const VisionMask = enum(u32) {
+// };
+
 /// Platforms are in the form of rectangle for now.
 /// later on we can add more complex shapes like circles or polygons
 /// if needed
 pub const Platform = struct {
     collision_step_id: u64 = 0,
     vision_step_id: u64 = 0,
+    vision_id: u32 = 1,
+    collision_id: u32 = 1,
+    drawable: bool = true,
     pos: Vec2f,
     size: Vec2f,
     color: rl.Color = .gray,
@@ -187,6 +196,13 @@ pub const WorldMap = struct {
         }
 
         try map.platforms.append(allocator, Platform{
+            .pos = .{ 0, 0 },
+            .size = .{1,1},
+            .collision_id = 0,
+            .drawable = false,
+        });
+
+        try map.platforms.append(allocator, Platform{
             .pos = .{ 100, 50 },
             .size = .{ 100, 200 },
         });
@@ -202,6 +218,7 @@ pub const WorldMap = struct {
         });
 
         for (map.platforms.items, 0..) |platform, pid| {
+            if (pid == 0) continue;
             const imin: usize = @intFromFloat(platform.pos[0] / iToF32(WorldMap.GridSize));
             const jmin: usize = @intFromFloat(platform.pos[1] / iToF32(WorldMap.GridSize));
             const imax: usize = @intFromFloat((platform.pos[0] + platform.size[0]) / iToF32(WorldMap.GridSize));
