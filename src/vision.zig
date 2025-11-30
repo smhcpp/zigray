@@ -134,7 +134,7 @@ pub const Vision = struct {
         }
     }
 
-    fn checkVisionCollision(v: *Vision, pid: usize, corner: *const Corner, closest: *Corner) !void {
+    fn checkVisionnCollision(v: *Vision, pid: usize, corner: *const Corner, closest: *Corner) !void {
         const collision = try v.getCollision(pid, corner);
         if (collision) |col| {
             const d = T.dist2(col, v.g.player.pos);
@@ -145,7 +145,38 @@ pub const Vision = struct {
             }
         }
     }
+    fn checkVisionCollision(v: *Vision, pid: usize, corner: *const Corner, closest: *Corner) !void {
+            const collision = try v.getCollision(pid, corner);
+            if (collision) |col| {
+                const d = T.dist2(col, v.g.player.pos);
 
+                if (closest.dist2 > d) {
+                    // --- LIGHT PENETRATION LOGIC ---
+                    // We push the light point slightly further into the wall
+                    // so we can see the face of the wall.
+
+                    const penetration_depth: f32 = 20.0; // How deep light goes into wall (pixels)
+                    const dist = std.math.sqrt(d);
+
+                    var extended_pos = col;
+
+                    if (dist > 0.1) {
+                        // Calculate normalized direction vector
+                        const dx = (col[0] - v.g.player.pos[0]) / dist;
+                        const dy = (col[1] - v.g.player.pos[1]) / dist;
+
+                        // Push the point further along that direction
+                        extended_pos[0] += dx * penetration_depth;
+                        extended_pos[1] += dy * penetration_depth;
+                    }
+
+                    // Update the closest hit with this new EXTENDED position
+                    closest.pos = extended_pos;
+                    closest.pid = pid;
+                    closest.dist2 = d; // Important: Compare against REAL distance, not extended distance
+                }
+            }
+        }
     fn getCollision(v: *Vision, pid: usize, corner: *const Corner) !?T.Vec2f {
         const p = v.g.wmap.platforms.items[pid];
         const segtop = Segment{ .start = p.pos, .end = p.pos + T.Vec2f{ p.size[0], 0 } };
@@ -178,9 +209,9 @@ pub const Vision = struct {
         std.mem.sort(Corner, v.hits.items, {}, comptime lessThan);
         var i:usize=0;
         while (i<v.hits.items.len-1):(i+=1){
-            rl.drawTriangle(T.toRLVec(v.g.player.pos), T.toRLVec(v.hits.items[i+1].pos), T.toRLVec(v.hits.items[i].pos),.yellow);
+            rl.drawTriangle(T.toRLVec(v.g.player.pos), T.toRLVec(v.hits.items[i+1].pos), T.toRLVec(v.hits.items[i].pos),.white);
         }
-        rl.drawTriangle(T.toRLVec(v.g.player.pos), T.toRLVec(v.hits.items[0].pos), T.toRLVec(v.hits.items[v.hits.items.len-1].pos),.yellow);
+        rl.drawTriangle(T.toRLVec(v.g.player.pos), T.toRLVec(v.hits.items[0].pos), T.toRLVec(v.hits.items[v.hits.items.len-1].pos),.white);
     }
 };
 

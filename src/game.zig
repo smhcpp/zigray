@@ -4,7 +4,14 @@ const T = @import("types.zig");
 const Vision = @import("vision.zig").Vision;
 const math = std.math;
 const print = std.debug.print;
+
 pub const Game = struct {
+    shader: rl.Shader = undefined,
+    player_pos_loc: i32 = undefined,
+    radius_loc: i32 = undefined,
+    resolution_loc: i32 = undefined,
+    renderTexture: rl.RenderTexture2D = undefined,
+
     collision_step_id: u64 = 0,
     vision: *Vision = undefined,
     pause: bool = false,
@@ -17,6 +24,7 @@ pub const Game = struct {
     wmap: *T.WorldMap = undefined,
     screenWidth: i32 = T.fToI32(T.WorldMap.GridSize * T.WorldMap.GridCellNumberX),
     screenHeight: i32 = T.fToI32(T.WorldMap.GridSize * T.WorldMap.GridCellNumberY),
+
     inputs: struct {
         right: bool,
         left: bool,
@@ -42,8 +50,6 @@ pub const Game = struct {
         game.* = .{
             .allocator = allocator,
         };
-        try game.setup();
-        game.dt = 1.0 / T.iToF32(game.fps);
         return game;
     }
 
@@ -82,10 +88,40 @@ pub const Game = struct {
         g.player = T.Player{
             .pos = .{ T.iToF32(@divTrunc(g.screenWidth, 2)), T.iToF32(@divTrunc(g.screenHeight, 2)) },
         };
-    }
 
+        // Shader setup
+        g.shader = try rl.loadShader(null, "assets/shaders/vision2.glsl");
+        if (g.shader.id == 0) {
+            print("ERROR: Failed to load shader\n", .{});
+            // Handle error or return
+        }
+
+        // Get Uniform Locations
+        g.player_pos_loc = rl.getShaderLocation(g.shader, "player_pos");
+        g.radius_loc = rl.getShaderLocation(g.shader, "radius");
+        g.resolution_loc = rl.getShaderLocation(g.shader, "resolution");
+
+        // Set constant uniforms (Resolution doesn't change)
+        const res = [2]f32{ T.iToF32(g.screenWidth), T.iToF32(g.screenHeight) };
+        rl.setShaderValue(g.shader, g.resolution_loc, &res, rl.ShaderUniformDataType.vec2);
+
+        // Load Render Texture (Off-screen canvas)
+        g.renderTexture = try rl.loadRenderTexture(g.screenWidth, g.screenHeight);
+        // rl.setTextureFilter(g.renderTexture.texture, rl.TextureFilter.bilinear);
+    }
     fn draw(g: *Game) void {
+        // --- PASS 1: DRAW VISION SHAPE (Mask) ---
+        rl.beginTextureMode(g.renderTexture);
+        // Clear to transparent
+        rl.clearBackground(rl.Color.blank);
+        // Draw the white triangles (the area user CAN see)
+        g.vision.drawPlayerVision();
+        rl.endTextureMode();
+
+        // --- PASS 2: DRAW GAME WORLD ---
         if (g.pause) g.drawGridLines();
+
+        // Draw Platforms
         for (g.wmap.platforms.items) |p| {
             if (!p.drawable) continue;
             const left = @max(p.pos[0], g.player.pos[0] - g.player.vision_r, 0);
@@ -95,8 +131,24 @@ pub const Game = struct {
             if (left < right and top < bottom)
                 rl.drawRectangleV(.{ .x = left, .y = top }, .{ .x = right - left, .y = bottom - top }, p.color);
         }
-        g.vision.drawPlayerVision();
+
+        // Draw Player
         g.player.draw();
+
+        // --- PASS 3: DRAW SHADOW OVERLAY ---
+        rl.beginShaderMode(g.shader);
+
+        const p_pos = [2]f32{ g.player.pos[0], g.player.pos[1] };
+        const rad = g.player.vision_r;
+        rl.setShaderValue(g.shader, g.player_pos_loc, &p_pos, rl.ShaderUniformDataType.vec2);
+        rl.setShaderValue(g.shader, g.radius_loc, &rad, rl.ShaderUniformDataType.float);
+
+        const tex = g.renderTexture.texture;
+        // Draw the texture over the whole screen.
+        // The shader reads this texture to decide where to draw BLACK.
+        rl.drawTextureRec(tex, rl.Rectangle{ .x = 0, .y = 0, .width = T.iToF32(tex.width), .height = -T.iToF32(tex.height) }, rl.Vector2{ .x = 0, .y = 0 }, rl.Color.white);
+
+        rl.endShaderMode();
     }
 
     fn drawGridLines(g: *Game) void {
@@ -133,6 +185,7 @@ pub const Game = struct {
     pub fn run(g: *Game) !void {
         rl.initWindow(g.screenWidth, g.screenHeight, "Platformer 2d");
         defer rl.closeWindow(); // Close window and OpenGL context
+        try g.setup();
         rl.setExitKey(rl.KeyboardKey.null);
         rl.setTargetFPS(g.fps); // Set our game to run at 60 frames-per-second
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
@@ -150,7 +203,10 @@ pub const Game = struct {
             g.draw();
         }
     }
+
     pub fn deinit(g: *Game) void {
+        rl.unloadRenderTexture(g.renderTexture);
+        rl.unloadShader(g.shader);
         g.vision.deinit();
         g.wmap.deinit(g.allocator);
         g.allocator.destroy(g);

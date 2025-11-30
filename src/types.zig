@@ -72,7 +72,7 @@ pub const Platform = struct {
     drawable: bool = true,
     pos: Vec2f,
     size: Vec2f,
-    color: rl.Color = .gray,
+    color: rl.Color = .sky_blue,
 };
 
 pub const GridCell = struct {
