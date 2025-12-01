@@ -39,6 +39,8 @@ pub const Player = struct {
     collision_mask: u32 = 1,
     vision_mask: u32 = 1,
     // drawable: bool = true,
+    texture_idle: rl.Texture2D = undefined,
+    // texture_run:rl.Texture2D,
     color: rl.Color = .blue,
     vel: Vec2f = Vec2f{ 0, 0 },
     maxvel: Vec2f = Vec2f{ 400, 600 },
@@ -47,14 +49,18 @@ pub const Player = struct {
     jump_power: f32 = 500,
     is_grounded: bool = false,
 
-    pub fn draw(g: *Player) void {
-        const baspos = toRLVec(g.pos);
-        const cir1pos = baspos.subtract(toRLVec(.{ 0, g.r }));
-        const cir2pos = baspos.add(toRLVec(.{ 0, g.r }));
-        const recpos = baspos.subtract(toRLVec(.{ g.r, g.r }));
-        rl.drawCircleV(cir1pos, g.r, g.color);
-        rl.drawCircleV(cir2pos, g.r, g.color);
-        rl.drawRectangleV(recpos, toRLVec(.{ g.r * 2, g.r * 2 }), g.color);
+    pub fn draw(p: *Player) void {
+        const baspos = toRLVec(p.pos);
+        const cir1pos = baspos.subtract(toRLVec(.{ 0, p.r }));
+        const cir2pos = baspos.add(toRLVec(.{ 0, p.r }));
+        const recpos = baspos.subtract(toRLVec(.{ p.r, p.r }));
+        rl.drawCircleV(cir1pos, p.r, p.color);
+        rl.drawCircleV(cir2pos, p.r, p.color);
+        rl.drawRectangleV(recpos, toRLVec(.{ p.r * 2, p.r * 2 }), p.color);
+    }
+
+    pub fn drawTexture(p: *Player) void {
+        p.texture_idle.draw(fToI32(p.pos[0] - p.r), fToI32(p.pos[1] - 2 * p.r), .blue);
     }
 };
 
@@ -129,39 +135,26 @@ pub fn checkPlayerCollision(pos: Vec2f, capr: f32, vel: Vec2f, plat: Platform, p
     var retvel = vel;
     const captop = pos[1] - capr;
     const capbot = pos[1] + capr;
-    // find closest point on platform to the capsule's center
     const closest_plat_point_x = math.clamp(pos[0], plat.pos[0], plat.pos[0] + plat.size[0]);
     const closest_plat_point_y = math.clamp(pos[1], plat.pos[1], plat.pos[1] + plat.size[1]);
-
-    // find closest point on capsule central vertical segment to the closest point of the platform
-    // that we found above
     const closest_cap_point_y = math.clamp(closest_plat_point_y, captop, capbot);
     const closest_cap_point_x = pos[0];
-
-    // find their distance^2:
     const dx = closest_cap_point_x - closest_plat_point_x;
     const dy = closest_cap_point_y - closest_plat_point_y;
     const dis2 = dx * dx + dy * dy;
-
-    // if there is collision
     if (dis2 < capr * capr and dis2 > 0) {
         const dist = math.sqrt(dis2);
         const overlap = capr - dist;
         const dx_norm = dx / dist;
         const dy_norm = dy / dist;
-
         poschange[0] += dx_norm * overlap;
         poschange[1] += dy_norm * overlap;
-
-        // if player is moving down and colliding with platform
         if (dy_norm < -0.7) {
             if (vel[1] > 0) retvel[1] = 0;
         }
-        // if player is hitting the platform from below
         if (dy_norm > 0.7 and retvel[1] < 0) {
             retvel[1] = 0;
         }
-        // if player is hitting the platform from the side
         if (@abs(dx_norm) > 0.7) {
             retvel[0] = 0;
         }
@@ -196,7 +189,7 @@ pub const WorldMap = struct {
 
         try map.platforms.append(allocator, Platform{
             .pos = .{ 0, 0 },
-            .size = .{1,1},
+            .size = .{ 1, 1 },
             .collision_id = 0,
             .drawable = false,
         });

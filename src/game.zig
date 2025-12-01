@@ -87,6 +87,10 @@ pub const Game = struct {
         }
     }
 
+    fn loadTextures(g:*Game) !void{
+        g.player.texture_idle= try rl.loadTexture("assets/sprites/player-idle.png");
+    }
+
     fn setup(g: *Game) !void {
         g.wmap = try T.WorldMap.init(g.allocator);
         g.vision = try Vision.init(g);
@@ -114,6 +118,7 @@ pub const Game = struct {
         // Load Render Texture (Off-screen canvas)
         g.renderTexture = try rl.loadRenderTexture(g.screenWidth, g.screenHeight);
         // rl.setTextureFilter(g.renderTexture.texture, rl.TextureFilter.bilinear);
+        try g.loadTextures();
     }
     fn draw(g: *Game) void {
         rl.beginTextureMode(g.renderTexture);
@@ -130,7 +135,8 @@ pub const Game = struct {
             if (left < right and top < bottom)
                 rl.drawRectangleV(.{ .x = left, .y = top }, .{ .x = right - left, .y = bottom - top }, p.color);
         }
-        g.player.draw();
+        // g.player.draw();
+        g.player.drawTexture();
         rl.beginShaderMode(g.shader);
         const p_pos = [2]f32{ g.player.pos[0], g.player.pos[1] };
         const rad = g.player.vision_r;
