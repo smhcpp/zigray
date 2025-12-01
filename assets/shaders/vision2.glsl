@@ -1,17 +1,9 @@
 #version 330
-
-// Input vertex attributes (from vertex shader)
 in vec2 fragTexCoord;
 in vec4 fragColor;
-
-// Output fragment color
 out vec4 finalColor;
-
-// Input uniform values
 uniform sampler2D texture0;
 uniform vec4 colDiffuse;
-
-// Custom uniforms passed from Zig
 uniform vec2 player_pos;
 uniform float radius;
 uniform vec2 resolution;
@@ -32,12 +24,14 @@ void main()
 
     float dist = distance(pixelPos, corrected_player_pos);
 
+    float minimum = 0.1;
     // 3. Calculate Visibility Factor (0.0 to 1.0)
     // Falloff: 1.0 at center, fading to 0.0 at radius edge
-    float falloff = clamp(1.0 - (dist / radius), 0.0, 1.0);
+    float falloff = clamp(1.0 - (dist / radius), minimum, 1.0);
 
     // Smooth the falloff curve (Hermite interpolation) for nicer looking light
-    falloff = falloff * falloff * (3.0 - 2.0 * falloff);
+    // falloff = falloff * falloff * (3.0 - 2.0 * falloff);
+    if (mask < minimum) mask = minimum;
 
     // A pixel is visible ONLY if it is inside the mask AND within radius
     float visibility = mask * falloff;

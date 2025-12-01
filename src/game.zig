@@ -110,18 +110,11 @@ pub const Game = struct {
         // rl.setTextureFilter(g.renderTexture.texture, rl.TextureFilter.bilinear);
     }
     fn draw(g: *Game) void {
-        // --- PASS 1: DRAW VISION SHAPE (Mask) ---
         rl.beginTextureMode(g.renderTexture);
-        // Clear to transparent
         rl.clearBackground(rl.Color.blank);
-        // Draw the white triangles (the area user CAN see)
         g.vision.drawPlayerVision();
         rl.endTextureMode();
-
-        // --- PASS 2: DRAW GAME WORLD ---
         if (g.pause) g.drawGridLines();
-
-        // Draw Platforms
         for (g.wmap.platforms.items) |p| {
             if (!p.drawable) continue;
             const left = @max(p.pos[0], g.player.pos[0] - g.player.vision_r, 0);
@@ -131,23 +124,14 @@ pub const Game = struct {
             if (left < right and top < bottom)
                 rl.drawRectangleV(.{ .x = left, .y = top }, .{ .x = right - left, .y = bottom - top }, p.color);
         }
-
-        // Draw Player
         g.player.draw();
-
-        // --- PASS 3: DRAW SHADOW OVERLAY ---
         rl.beginShaderMode(g.shader);
-
         const p_pos = [2]f32{ g.player.pos[0], g.player.pos[1] };
         const rad = g.player.vision_r;
         rl.setShaderValue(g.shader, g.player_pos_loc, &p_pos, rl.ShaderUniformDataType.vec2);
         rl.setShaderValue(g.shader, g.radius_loc, &rad, rl.ShaderUniformDataType.float);
-
         const tex = g.renderTexture.texture;
-        // Draw the texture over the whole screen.
-        // The shader reads this texture to decide where to draw BLACK.
         rl.drawTextureRec(tex, rl.Rectangle{ .x = 0, .y = 0, .width = T.iToF32(tex.width), .height = -T.iToF32(tex.height) }, rl.Vector2{ .x = 0, .y = 0 }, rl.Color.white);
-
         rl.endShaderMode();
     }
 
