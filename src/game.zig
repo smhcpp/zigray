@@ -16,7 +16,7 @@ pub const Game = struct {
     vision: *Vision = undefined,
     pause: bool = false,
     fps: i32 = 60,
-    gravity: f32 = 500,
+    gravity: f32 = 600,
     friction: f32 = 10,
     dt: f32 = undefined,
     allocator: std.mem.Allocator,
@@ -34,6 +34,8 @@ pub const Game = struct {
         dash: bool,
         attack: bool,
         escape: bool,
+        space: bool,
+        space_release: bool,
     } = .{
         .right = false,
         .left = false,
@@ -43,6 +45,8 @@ pub const Game = struct {
         .dash = false,
         .attack = false,
         .escape = false,
+        .space = false,
+        .space_release = false,
     },
 
     pub fn init(allocator: std.mem.Allocator) !*Game {
@@ -74,6 +78,8 @@ pub const Game = struct {
         g.inputs.jump = rl.isKeyDown(rl.KeyboardKey.space);
         g.inputs.dash = rl.isKeyDown(rl.KeyboardKey.e);
         g.inputs.attack = rl.isKeyDown(rl.KeyboardKey.r);
+        g.inputs.space = rl.isKeyPressed(rl.KeyboardKey.space);
+        g.inputs.space_release = rl.isKeyReleased(rl.KeyboardKey.space);
         g.inputs.escape = rl.isKeyPressed(rl.KeyboardKey.escape);
         if (g.inputs.escape) {
             g.pause = !g.pause;
@@ -157,9 +163,10 @@ pub const Game = struct {
             if (g.player.vel[0] > 0) g.player.vel[0] -= g.friction;
             if (g.player.vel[0] < 0) g.player.vel[0] += g.friction;
         }
-        if (rl.isKeyPressed(rl.KeyboardKey.space)) {
+        if (g.inputs.space) {
             g.player.vel[1] = -g.player.jump_power;
         }
+        if (g.inputs.space_release and g.player.vel[1] < 0) g.player.vel[1] /= 2;
 
         const gr = if (g.player.vel[1] > 0) 2 * g.gravity * g.dt else g.gravity * g.dt;
         g.player.vel[1] = if (g.player.vel[1] <= g.player.maxvel[1]) g.player.vel[1] + gr else g.player.maxvel[1];
@@ -173,11 +180,10 @@ pub const Game = struct {
         rl.setExitKey(rl.KeyboardKey.null);
         rl.setTargetFPS(g.fps); // Set our game to run at 60 frames-per-second
         while (!rl.windowShouldClose()) { // Detect window close button or ESC key
-            // g.collision_frame_id += 1;
             g.updateInputs();
-            g._testInput();
+            // g._testInput();
             if (!g.pause) {
-                // g.process();
+                g.process();
                 try g.vision.updatePlayerVision();
             }
 

@@ -42,7 +42,7 @@ pub const Player = struct {
     color: rl.Color = .blue,
     vel: Vec2f = Vec2f{ 0, 0 },
     maxvel: Vec2f = Vec2f{ 400, 600 },
-    speedX: f32 = 250,
+    speedX: f32 = 200,
     vision_r: f32 = 200,
     jump_power: f32 = 500,
     is_grounded: bool = false,
@@ -57,9 +57,6 @@ pub const Player = struct {
         rl.drawRectangleV(recpos, toRLVec(.{ g.r * 2, g.r * 2 }), g.color);
     }
 };
-
-// pub const VisionMask = enum(u32) {
-// };
 
 /// Platforms are in the form of rectangle for now.
 /// later on we can add more complex shapes like circles or polygons
@@ -106,6 +103,8 @@ pub fn movePlayer(g: *Game) void {
                 if (j < 0 or k < 0 or j >= WorldMap.GridCellNumberX or k >= WorldMap.GridCellNumberY) continue;
                 for (g.wmap.grid[@intCast(j)][@intCast(k)].pids.items) |pid| {
                     if (g.collision_step_id == g.wmap.platforms.items[pid].collision_step_id) continue;
+                    const col_id = g.wmap.platforms.items[pid].collision_id;
+                    if (g.player.collision_mask | col_id != col_id and col_id == 0) continue;
                     retvel = checkPlayerCollision(pos, g.player.r, g.player.vel, g.wmap.platforms.items[pid], &poschange);
                     if (g.player.vel[0] != retvel[0]) {
                         velocity_step[0] = 0;
